@@ -1,0 +1,31 @@
+[package]
+name = "rustle-plan"
+version = "0.1.0"
+edition = "2021"
+description = "Execution planner for rustle automation tool - generates optimized execution plans with binary deployment strategies"
+license = "MIT"
+authors = ["rustle team"]
+
+[[bin]]
+name = "rustle-plan"
+path = "src/bin/rustle-plan.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+petgraph = "0.6"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+regex = "1"
+tokio = { version = "1", features = ["time"] }
+md5 = "0.7"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+criterion = "0.5"

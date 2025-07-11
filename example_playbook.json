@@ -1,0 +1,65 @@
+{
+  "name": "example-playbook",
+  "plays": [
+    {
+      "name": "Configure web servers",
+      "hosts": ["all"],
+      "tasks": [
+        {
+          "id": "task-1",
+          "name": "Install nginx",
+          "module": "package",
+          "args": {
+            "name": "nginx",
+            "state": "present"
+          },
+          "dependencies": [],
+          "tags": ["install"],
+          "when": null,
+          "notify": ["restart nginx"]
+        },
+        {
+          "id": "task-2",
+          "name": "Copy nginx config",
+          "module": "copy",
+          "args": {
+            "src": "/tmp/nginx.conf",
+            "dest": "/etc/nginx/nginx.conf"
+          },
+          "dependencies": ["task-1"],
+          "tags": ["config"],
+          "when": null,
+          "notify": ["restart nginx"]
+        },
+        {
+          "id": "task-3",
+          "name": "Start nginx service",
+          "module": "service",
+          "args": {
+            "name": "nginx",
+            "state": "started",
+            "enabled": true
+          },
+          "dependencies": ["task-2"],
+          "tags": ["service"],
+          "when": null,
+          "notify": []
+        }
+      ],
+      "handlers": [
+        {
+          "id": "handler-1",
+          "name": "restart nginx",
+          "module": "service",
+          "args": {
+            "name": "nginx",
+            "state": "restarted"
+          },
+          "when": null
+        }
+      ],
+      "vars": {}
+    }
+  ],
+  "vars": {}
+}

@@ -3,6 +3,7 @@ name = "rustle-plan"
 version = "0.1.0"
 edition = "2021"
 authors = ["Glen Baker <iepathos@gmail.com>"]
+repository = "https://github.com/iepathos/rustle-plan"
 description = "Execution planner for rustle automation tool - generates optimized execution plans with binary deployment strategies"
 license = "GPL-3.0"
 

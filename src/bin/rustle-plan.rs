@@ -271,7 +271,7 @@ fn main() -> Result<()> {
 }
 
 fn create_placeholder_playbook(content: &str) -> Result<rustle_plan::ParsedPlaybook> {
-    use serde::{Deserialize};
+    use serde::Deserialize;
     use std::collections::HashMap;
 
     #[derive(Deserialize)]
@@ -311,41 +311,49 @@ fn create_placeholder_playbook(content: &str) -> Result<rustle_plan::ParsedPlayb
         when: Option<String>,
     }
 
-    let parsed: RustleParsePlaybook = serde_json::from_str(content)
-        .context("Failed to parse playbook JSON from rustle-parse")?;
+    let parsed: RustleParsePlaybook =
+        serde_json::from_str(content).context("Failed to parse playbook JSON from rustle-parse")?;
 
-    let plays = parsed.plays.into_iter().map(|play| {
-        let tasks = play.tasks.into_iter().map(|task| {
-            rustle_plan::ParsedTask {
-                id: task.id,
-                name: task.name,
-                module: task.module,
-                args: task.args,
-                dependencies: task.dependencies,
-                tags: task.tags,
-                when: task.when,
-                notify: task.notify,
+    let plays = parsed
+        .plays
+        .into_iter()
+        .map(|play| {
+            let tasks = play
+                .tasks
+                .into_iter()
+                .map(|task| rustle_plan::ParsedTask {
+                    id: task.id,
+                    name: task.name,
+                    module: task.module,
+                    args: task.args,
+                    dependencies: task.dependencies,
+                    tags: task.tags,
+                    when: task.when,
+                    notify: task.notify,
+                })
+                .collect();
+
+            let handlers = play
+                .handlers
+                .into_iter()
+                .map(|handler| rustle_plan::ParsedHandler {
+                    id: handler.id,
+                    name: handler.name,
+                    module: handler.module,
+                    args: handler.args,
+                    when: handler.when,
+                })
+                .collect();
+
+            rustle_plan::ParsedPlay {
+                name: play.name,
+                hosts: play.hosts,
+                tasks,
+                handlers,
+                vars: play.vars,
             }
-        }).collect();
-
-        let handlers = play.handlers.into_iter().map(|handler| {
-            rustle_plan::ParsedHandler {
-                id: handler.id,
-                name: handler.name,
-                module: handler.module,
-                args: handler.args,
-                when: handler.when,
-            }
-        }).collect();
-
-        rustle_plan::ParsedPlay {
-            name: play.name,
-            hosts: play.hosts,
-            tasks,
-            handlers,
-            vars: play.vars,
-        }
-    }).collect();
+        })
+        .collect();
 
     Ok(rustle_plan::ParsedPlaybook {
         name: parsed.name,

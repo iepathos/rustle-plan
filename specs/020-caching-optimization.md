@@ -1,12 +1,12 @@
-# Spec 030: Intelligent Caching & Optimization
+# Spec 020: Local Caching & Incremental Planning
 
 ## Feature Summary
 
-The intelligent caching and optimization feature adds sophisticated caching mechanisms to rustle-plan to dramatically improve planning performance for repeated or similar playbooks. It implements content-aware caching, incremental planning updates, and predictive pre-computation to minimize planning latency and resource usage.
+The local caching and incremental planning feature adds intelligent caching mechanisms to rustle-plan to dramatically improve planning performance for repeated or similar playbooks. It implements content-aware caching, incremental planning updates, and local optimization to minimize planning latency and resource usage while maintaining Unix tool simplicity.
 
 **Problem it solves**: Currently, every planning operation starts from scratch, even for playbooks that have minimal changes or have been planned recently. This leads to unnecessary computational overhead, especially in CI/CD environments where similar playbooks are planned frequently.
 
-**High-level approach**: Implement a multi-layered caching system that caches planning results, dependency graphs, binary deployment analyses, and intermediate computations. Use content hashing and change detection to enable incremental updates and cache invalidation strategies.
+**High-level approach**: Implement local caching that stores planning results, dependency graphs, and binary deployment analyses. Use content hashing and change detection to enable incremental updates and cache invalidation strategies. Keep all caching logic self-contained within rustle-plan.
 
 ## Goals & Requirements
 
@@ -15,10 +15,9 @@ The intelligent caching and optimization feature adds sophisticated caching mech
 - Incremental planning for minimal playbook changes
 - Dependency graph caching and reuse
 - Binary deployment analysis caching
-- Predictive pre-computation of likely planning scenarios
-- Cache warming strategies for common playbook patterns
-- Distributed cache support for team environments
-- Cache analytics and hit rate optimization
+- Local disk-based cache persistence
+- Cache hit rate optimization
+- Intelligent cache eviction policies
 
 ### Non-functional Requirements
 - **Performance**: 90%+ cache hit rate for typical CI/CD workloads
@@ -33,6 +32,7 @@ The intelligent caching and optimization feature adds sophisticated caching mech
 - Zero cache-related correctness issues
 - Support for 10,000+ cached plans with <500MB memory usage
 - Transparent operation requiring no user workflow changes
+- Self-contained operation with no external dependencies
 
 ## API/Interface Design
 
@@ -45,21 +45,18 @@ pub trait PlanCache {
     fn invalidate(&self, key: &CacheKey) -> Result<(), CacheError>;
     fn invalidate_prefix(&self, prefix: &str) -> Result<(), CacheError>;
     fn get_stats(&self) -> CacheStats;
-    fn warm_cache(&self, scenarios: &[WarmupScenario]) -> Result<(), CacheError>;
 }
 
-pub struct IntelligentPlanCache {
-    l1_cache: Arc<MemoryCache>,
-    l2_cache: Arc<DiskCache>,
-    distributed_cache: Option<Arc<dyn DistributedCache>>,
+pub struct LocalPlanCache {
+    memory_cache: MemoryCache,
+    disk_cache: DiskCache,
     config: CacheConfig,
     hasher: ContentHasher,
     invalidation_tracker: InvalidationTracker,
 }
 
-impl IntelligentPlanCache {
+impl LocalPlanCache {
     pub fn new(config: CacheConfig) -> Self;
-    pub fn with_distributed_backend(mut self, backend: Arc<dyn DistributedCache>) -> Self;
     pub fn get_or_compute<F>(&self, key: CacheKey, compute_fn: F) -> Result<ExecutionPlan, CacheError>
     where
         F: FnOnce() -> Result<ExecutionPlan, PlanError>;
@@ -111,12 +108,12 @@ pub struct CacheStats {
 ```rust
 pub struct IncrementalPlanner {
     base_planner: ExecutionPlanner,
-    cache: Arc<IntelligentPlanCache>,
+    cache: Arc<LocalPlanCache>,
     change_detector: PlaybookChangeDetector,
 }
 
 impl IncrementalPlanner {
-    pub fn new(base_planner: ExecutionPlanner, cache: Arc<IntelligentPlanCache>) -> Self;
+    pub fn new(base_planner: ExecutionPlanner, cache: Arc<LocalPlanCache>) -> Self;
     
     pub fn plan_incremental(
         &self,
@@ -198,79 +195,6 @@ impl StableHasher {
 }
 ```
 
-### Distributed Cache Support
-
-```rust
-pub trait DistributedCache: Send + Sync {
-    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, DistributedCacheError>;
-    fn set(&self, key: &str, value: Vec<u8>, ttl: Option<Duration>) -> Result<(), DistributedCacheError>;
-    fn delete(&self, key: &str) -> Result<(), DistributedCacheError>;
-    fn delete_prefix(&self, prefix: &str) -> Result<u64, DistributedCacheError>;
-    fn ping(&self) -> Result<(), DistributedCacheError>;
-}
-
-pub struct RedisCache {
-    client: redis::Client,
-    connection_pool: redis::aio::ConnectionManager,
-    prefix: String,
-}
-
-pub struct EtcdCache {
-    client: etcd_client::EtcdClient,
-    prefix: String,
-}
-
-pub struct S3Cache {
-    client: aws_sdk_s3::Client,
-    bucket: String,
-    prefix: String,
-}
-
-impl RedisCache {
-    pub fn new(connection_string: &str, prefix: String) -> Result<Self, DistributedCacheError>;
-    pub async fn connect(&mut self) -> Result<(), DistributedCacheError>;
-}
-```
-
-### Predictive Pre-computation
-
-```rust
-pub struct PredictiveCache {
-    cache: Arc<IntelligentPlanCache>,
-    predictor: PlanningPredictor,
-    precompute_scheduler: TaskScheduler,
-}
-
-impl PredictiveCache {
-    pub fn new(cache: Arc<IntelligentPlanCache>, config: PredictiveConfig) -> Self;
-    pub fn analyze_patterns(&self, historical_data: &[PlanningRequest]) -> Vec<PredictionPattern>;
-    pub fn schedule_precomputation(&self, patterns: &[PredictionPattern]) -> Result<(), PredictiveError>;
-    pub fn precompute_likely_scenarios(&self) -> Result<PrecomputeResult, PredictiveError>;
-}
-
-#[derive(Debug, Clone)]
-pub struct PredictionPattern {
-    pub pattern_type: PatternType,
-    pub frequency: f64,
-    pub variation_points: Vec<VariationPoint>,
-    pub confidence: f64,
-}
-
-#[derive(Debug, Clone)]
-pub enum PatternType {
-    RecurringPlaybook { base_hash: String },
-    ParametricVariation { template_hash: String },
-    BranchingWorkflow { decision_points: Vec<String> },
-    ScalingPattern { base_size: usize, scaling_factor: f64 },
-}
-
-#[derive(Debug, Clone)]
-pub struct VariationPoint {
-    pub field_path: String,
-    pub variation_type: VariationType,
-    pub common_values: Vec<String>,
-}
-```
 
 ## File and Package Structure
 
@@ -278,26 +202,15 @@ pub struct VariationPoint {
 src/
 ├── cache/
 │   ├── mod.rs                      # Module exports and main cache interface
-│   ├── intelligent.rs              # IntelligentPlanCache implementation
-│   ├── memory.rs                   # In-memory L1 cache
-│   ├── disk.rs                     # Persistent L2 cache
-│   ├── distributed/
-│   │   ├── mod.rs                  # Distributed cache trait
-│   │   ├── redis.rs                # Redis cache implementation
-│   │   ├── etcd.rs                 # etcd cache implementation
-│   │   └── s3.rs                   # S3 cache implementation
+│   ├── local.rs                    # LocalPlanCache implementation
+│   ├── memory.rs                   # In-memory cache
+│   ├── disk.rs                     # Persistent disk cache
 │   ├── incremental.rs              # Incremental planning logic
 │   ├── hasher.rs                   # Content hashing utilities
 │   ├── invalidation.rs             # Cache invalidation strategies
 │   ├── analytics.rs                # Cache performance analytics
 │   ├── serialization.rs            # Efficient plan serialization
 │   └── error.rs                    # Cache error types
-├── prediction/
-│   ├── mod.rs                      # Predictive caching exports
-│   ├── predictor.rs                # Pattern recognition and prediction
-│   ├── scheduler.rs                # Precomputation scheduling
-│   ├── patterns.rs                 # Pattern analysis algorithms
-│   └── precompute.rs               # Background precomputation
 └── change_detection/
     ├── mod.rs                      # Change detection exports
     ├── playbook_diff.rs            # Playbook difference algorithms
@@ -325,17 +238,17 @@ src/
 3. Add dependency graph caching and reuse
 4. Implement selective cache invalidation
 
-### Phase 4: Distributed Caching
-1. Implement Redis distributed cache backend
-2. Add cache synchronization and consistency mechanisms
-3. Create team-wide cache sharing capabilities
-4. Implement cache warming and population strategies
+### Phase 4: Advanced Local Optimization
+1. Implement intelligent cache eviction policies
+2. Add cache hit rate optimization algorithms  
+3. Create automated cache sizing recommendations
+4. Implement cache warming for common scenarios
 
-### Phase 5: Predictive Optimization
-1. Add pattern recognition for common planning scenarios
-2. Implement background precomputation scheduling
-3. Create predictive cache warming based on usage patterns
-4. Add machine learning-based optimization suggestions
+### Phase 5: Performance Monitoring
+1. Add comprehensive cache performance metrics
+2. Implement cache effectiveness analysis
+3. Create optimization recommendations
+4. Add cache health monitoring and diagnostics
 
 ### Key Algorithms
 
@@ -434,29 +347,38 @@ impl IncrementalPlanner {
 
 **Cache Warming Strategy**:
 ```rust
-impl PredictiveCache {
-    async fn warm_cache_background(&self) {
-        let patterns = self.analyze_recent_patterns().await;
-        
-        for pattern in patterns {
-            if pattern.confidence > 0.8 {
-                let scenarios = self.generate_scenarios_from_pattern(&pattern);
-                
-                for scenario in scenarios {
-                    if !self.cache.contains_key(&scenario.cache_key) {
-                        tokio::spawn({
-                            let cache = self.cache.clone();
-                            let scenario = scenario.clone();
-                            async move {
-                                if let Ok(plan) = scenario.compute_plan().await {
-                                    cache.store_plan(scenario.cache_key, plan).await;
-                                }
-                            }
-                        });
-                    }
+impl LocalPlanCache {
+    fn warm_cache_from_recent(&self, recent_plans: &[ExecutionPlan]) -> Result<(), CacheError> {
+        // Simple cache warming based on recently used plans
+        for plan in recent_plans {
+            let key = self.generate_cache_key_for_plan(plan)?;
+            if !self.contains_key(&key) {
+                // Pre-compute variations of successful plans
+                let variations = self.generate_plan_variations(plan)?;
+                for variation in variations {
+                    let variation_key = self.generate_cache_key_for_plan(&variation)?;
+                    self.store_plan(variation_key, CachedPlan::from(variation))?;
                 }
             }
         }
+        Ok(())
+    }
+    
+    fn generate_plan_variations(&self, base_plan: &ExecutionPlan) -> Result<Vec<ExecutionPlan>, CacheError> {
+        // Generate simple variations (different host subsets, tag filters, etc.)
+        let mut variations = Vec::new();
+        
+        // Host subset variations
+        if base_plan.hosts.len() > 1 {
+            for chunk_size in [base_plan.hosts.len() / 2, base_plan.hosts.len() / 4] {
+                if chunk_size > 0 {
+                    let subset_plan = self.create_host_subset_plan(base_plan, chunk_size)?;
+                    variations.push(subset_plan);
+                }
+            }
+        }
+        
+        Ok(variations)
     }
 }
 ```
@@ -525,16 +447,11 @@ tests/fixtures/cache/
 ```toml
 [dependencies]
 # Existing dependencies...
-redis = { version = "0.23", features = ["aio", "tokio-comp"] }
-etcd-client = "0.12"
-aws-sdk-s3 = "0.29"
 blake3 = "1.4"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 lru = "0.11"
 dashmap = "5.5"
 bincode = "1.3"
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
-moka = { version = "0.11", features = ["future"] }
 ```
 
 ### Internal Dependencies
@@ -562,28 +479,20 @@ directory = "./cache"
 max_size_gb = 5
 compression = "zstd"
 
-[cache.distributed]
-backend = "redis"  # or "etcd", "s3"
-connection_string = "redis://localhost:6379"
-key_prefix = "rustle-plan:"
-ttl_hours = 24
-
 [cache.incremental]
 enabled = true
 max_change_impact = 0.3  # Threshold for incremental vs full replanning
 change_detection_depth = 3
 
-[cache.predictive]
+[cache.warming]
 enabled = true
-pattern_analysis_window_days = 30
-precompute_confidence_threshold = 0.8
-max_background_tasks = 4
+recent_plans_window_hours = 24
+max_variations_per_plan = 5
 ```
 
 ### Environment Variables
 - `RUSTLE_CACHE_ENABLED`: Enable/disable caching
 - `RUSTLE_CACHE_DIR`: Cache directory location
-- `RUSTLE_REDIS_URL`: Redis connection for distributed caching
 - `RUSTLE_CACHE_SIZE_MB`: Maximum memory cache size
 
 ## Documentation
@@ -610,7 +519,7 @@ max_background_tasks = 4
 
 ### Basic Cache Configuration
 ```rust
-use rustle_plan::cache::{IntelligentPlanCache, CacheConfig};
+use rustle_plan::cache::{LocalPlanCache, CacheConfig};
 
 let config = CacheConfig {
     memory_cache_size: 256 * 1024 * 1024, // 256MB
@@ -620,7 +529,7 @@ let config = CacheConfig {
     ..Default::default()
 };
 
-let cache = IntelligentPlanCache::new(config);
+let cache = LocalPlanCache::new(config);
 let planner = ExecutionPlanner::new().with_cache(cache);
 ```
 

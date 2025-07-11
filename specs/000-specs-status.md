@@ -12,10 +12,7 @@ This document tracks the status of all specification documents in the project.
 
 | Spec | Feature | Status |
 |------|---------|--------|
-| 020 | Execution Monitoring | ⬜ Planned |
-| 030 | Caching Optimization | ⬜ Planned |
-| 040 | Runtime Integration | ⬜ Planned |
-| 050 | Advanced Analytics | ⬜ Planned |
+| 020 | Caching Optimization | ⬜ Planned |
 
 ## Notes
 

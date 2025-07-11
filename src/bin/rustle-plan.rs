@@ -254,14 +254,14 @@ where
     D: serde::Deserializer<'de>,
 {
     use serde::Deserialize;
-    
+
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum StringOrVec {
         String(String),
         Vec(Vec<String>),
     }
-    
+
     match StringOrVec::deserialize(deserializer)? {
         StringOrVec::String(s) => Ok(vec![s]),
         StringOrVec::Vec(v) => Ok(v),

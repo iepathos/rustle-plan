@@ -1,0 +1,108 @@
+{
+  "metadata": {
+    "file_path": "rustle-parse/tests/fixtures/playbooks/simple.yml",
+    "version": null,
+    "created_at": "2025-07-11T01:32:26.757608Z",
+    "checksum": "d48e92ff5b2b8cd603041d0d6a56a9c4674696e8e3c7601a6c526e6a37adea50"
+  },
+  "plays": [
+    {
+      "name": "Simple test playbook",
+      "hosts": "all",
+      "vars": {
+        "number_var": 42,
+        "test_var": "hello world"
+      },
+      "tasks": [
+        {
+          "id": "task_0",
+          "name": "Print a message",
+          "module": "debug",
+          "args": {
+            "msg": "hello world"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [
+            "debug",
+            "test"
+          ],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_1",
+          "name": "Install package",
+          "module": "package",
+          "args": {
+            "name": "git",
+            "state": "present"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_2",
+          "name": "Notify handler",
+          "module": "command",
+          "args": {
+            "_raw_params": "/bin/true"
+          },
+          "vars": {},
+          "when": "test_var is defined",
+          "loop_items": null,
+          "tags": [],
+          "notify": [
+            "restart service"
+          ],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        }
+      ],
+      "handlers": [
+        {
+          "id": "task_0",
+          "name": "restart service",
+          "module": "service",
+          "args": {
+            "state": "restarted",
+            "name": "example"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        }
+      ],
+      "roles": [],
+      "strategy": "linear",
+      "serial": null,
+      "max_fail_percentage": null
+    }
+  ],
+  "variables": {},
+  "facts_required": false,
+  "vault_ids": []
+}

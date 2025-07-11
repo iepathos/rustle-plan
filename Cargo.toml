@@ -2,9 +2,9 @@
 name = "rustle-plan"
 version = "0.1.0"
 edition = "2021"
+authors = ["Glen Baker <iepathos@gmail.com>"]
 description = "Execution planner for rustle automation tool - generates optimized execution plans with binary deployment strategies"
-license = "MIT"
-authors = ["rustle team"]
+license = "GPL-3.0"
 
 [[bin]]
 name = "rustle-plan"

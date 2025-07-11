@@ -16,10 +16,6 @@ struct Cli {
     #[arg(value_name = "PARSED_PLAYBOOK")]
     playbook: Option<PathBuf>,
 
-    /// Parsed inventory file
-    #[arg(short, long, value_name = "FILE")]
-    inventory: Option<PathBuf>,
-
     /// Limit execution to specific hosts
     #[arg(short, long, value_name = "PATTERN")]
     limit: Option<String>,
@@ -163,25 +159,8 @@ fn main() -> Result<()> {
         content
     };
 
-    // For now, we'll create a placeholder parsed playbook structure
-    // In a real implementation, this would come from rustle-parse
-    let parsed_playbook = create_placeholder_playbook(&playbook_content)?;
-
-    // Read inventory if provided
-    let inventory_content = if let Some(ref path) = cli.inventory {
-        Some(
-            std::fs::read_to_string(path)
-                .with_context(|| format!("Failed to read inventory file: {}", path.display()))?,
-        )
-    } else {
-        None
-    };
-
-    let parsed_inventory = if let Some(content) = inventory_content {
-        create_placeholder_inventory(&content)?
-    } else {
-        create_default_inventory()
-    };
+    // Parse the combined output from rustle-parse (includes both playbook and inventory)
+    let (parsed_playbook, parsed_inventory) = parse_rustle_output(&playbook_content)?;
 
     // Create planning options
     let planning_options = PlanningOptions {
@@ -270,15 +249,31 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_placeholder_playbook(content: &str) -> Result<rustle_plan::ParsedPlaybook> {
+fn parse_rustle_output(
+    content: &str,
+) -> Result<(rustle_plan::ParsedPlaybook, rustle_plan::ParsedInventory)> {
     use serde::Deserialize;
     use std::collections::HashMap;
 
     #[derive(Deserialize)]
-    struct RustleParsePlaybook {
-        name: String,
+    struct RustleParseOutput {
+        metadata: RustleParseMetadata,
         plays: Vec<RustleParsePlay>,
-        vars: HashMap<String, serde_json::Value>,
+        variables: HashMap<String, serde_json::Value>,
+        #[serde(default)]
+        inventory: Option<RustleParseInventory>,
+    }
+
+    #[derive(Deserialize)]
+    struct RustleParseMetadata {
+        file_path: String,
+        #[serde(default)]
+        #[allow(dead_code)]
+        version: Option<String>,
+        #[allow(dead_code)]
+        created_at: String,
+        #[allow(dead_code)]
+        checksum: String,
     }
 
     #[derive(Deserialize)]
@@ -311,8 +306,22 @@ fn create_placeholder_playbook(content: &str) -> Result<rustle_plan::ParsedPlayb
         when: Option<String>,
     }
 
-    let parsed: RustleParsePlaybook =
-        serde_json::from_str(content).context("Failed to parse playbook JSON from rustle-parse")?;
+    #[derive(Deserialize)]
+    struct RustleParseInventory {
+        hosts: Vec<String>,
+        groups: HashMap<String, Vec<String>>,
+        vars: HashMap<String, serde_json::Value>,
+    }
+
+    let parsed: RustleParseOutput =
+        serde_json::from_str(content).context("Failed to parse JSON from rustle-parse")?;
+
+    // Extract playbook name from file path
+    let playbook_name = std::path::Path::new(&parsed.metadata.file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
 
     let plays = parsed
         .plays
@@ -355,32 +364,23 @@ fn create_placeholder_playbook(content: &str) -> Result<rustle_plan::ParsedPlayb
         })
         .collect();
 
-    Ok(rustle_plan::ParsedPlaybook {
-        name: parsed.name,
+    let parsed_playbook = rustle_plan::ParsedPlaybook {
+        name: playbook_name,
         plays,
-        vars: parsed.vars,
-    })
-}
+        vars: parsed.variables,
+    };
 
-fn create_placeholder_inventory(content: &str) -> Result<rustle_plan::ParsedInventory> {
-    use serde::Deserialize;
-    use std::collections::HashMap;
+    let parsed_inventory = if let Some(inventory) = parsed.inventory {
+        rustle_plan::ParsedInventory {
+            hosts: inventory.hosts,
+            groups: inventory.groups,
+            vars: inventory.vars,
+        }
+    } else {
+        create_default_inventory()
+    };
 
-    #[derive(Deserialize)]
-    struct RustleParseInventory {
-        hosts: Vec<String>,
-        groups: HashMap<String, Vec<String>>,
-        vars: HashMap<String, serde_json::Value>,
-    }
-
-    let parsed: RustleParseInventory = serde_json::from_str(content)
-        .context("Failed to parse inventory JSON from rustle-parse")?;
-
-    Ok(rustle_plan::ParsedInventory {
-        hosts: parsed.hosts,
-        groups: parsed.groups,
-        vars: parsed.vars,
-    })
+    Ok((parsed_playbook, parsed_inventory))
 }
 
 fn create_default_inventory() -> rustle_plan::ParsedInventory {

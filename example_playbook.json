@@ -1,5 +1,10 @@
 {
-  "name": "example-playbook",
+  "metadata": {
+    "file_path": "example_playbook.yml",
+    "version": null,
+    "created_at": "2025-07-11T01:15:00.000000Z",
+    "checksum": "d48e92ff5b2b8cd603041d0d6a56a9c4674696e8e3c7601a6c526e6a37adea50"
+  },
   "plays": [
     {
       "name": "Configure web servers",
@@ -61,5 +66,17 @@
       "vars": {}
     }
   ],
-  "vars": {}
+  "variables": {},
+  "inventory": {
+    "hosts": ["server1", "server2", "server3"],
+    "groups": {
+      "webservers": ["server1", "server2"],
+      "databases": ["server3"]
+    },
+    "vars": {
+      "nginx_version": "1.20.2"
+    }
+  },
+  "facts_required": false,
+  "vault_ids": []
 }

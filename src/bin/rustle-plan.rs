@@ -249,6 +249,25 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn deserialize_hosts<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        String(String),
+        Vec(Vec<String>),
+    }
+    
+    match StringOrVec::deserialize(deserializer)? {
+        StringOrVec::String(s) => Ok(vec![s]),
+        StringOrVec::Vec(v) => Ok(v),
+    }
+}
+
 fn parse_rustle_output(
     content: &str,
 ) -> Result<(rustle_plan::ParsedPlaybook, rustle_plan::ParsedInventory)> {
@@ -279,6 +298,7 @@ fn parse_rustle_output(
     #[derive(Deserialize)]
     struct RustleParsePlay {
         name: String,
+        #[serde(deserialize_with = "deserialize_hosts")]
         hosts: Vec<String>,
         tasks: Vec<RustleParseTask>,
         handlers: Vec<RustleParseHandler>,

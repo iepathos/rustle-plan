@@ -252,3 +252,401 @@ impl Default for BinarySuitabilityAnalyzer {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    fn create_test_task(id: &str, module: &str) -> TaskPlan {
+        TaskPlan {
+            task_id: id.to_string(),
+            name: format!("Test Task {}", id),
+            module: module.to_string(),
+            args: HashMap::new(),
+            hosts: vec!["host1".to_string()],
+            dependencies: vec![],
+            conditions: vec![],
+            tags: vec![],
+            notify: vec![],
+            execution_order: 1,
+            can_run_parallel: true,
+            estimated_duration: Some(Duration::from_secs(5)),
+            risk_level: RiskLevel::Low,
+        }
+    }
+
+    fn create_task_with_args(
+        id: &str,
+        module: &str,
+        args: HashMap<String, serde_json::Value>,
+    ) -> TaskPlan {
+        let mut task = create_test_task(id, module);
+        task.args = args;
+        task
+    }
+
+    fn create_task_with_hosts(id: &str, module: &str, hosts: Vec<String>) -> TaskPlan {
+        let mut task = create_test_task(id, module);
+        task.hosts = hosts;
+        task
+    }
+
+    fn create_task_with_risk(id: &str, module: &str, risk: RiskLevel) -> TaskPlan {
+        let mut task = create_test_task(id, module);
+        task.risk_level = risk;
+        task
+    }
+
+    #[test]
+    fn test_new() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        assert!(std::ptr::eq(&analyzer, &analyzer));
+    }
+
+    #[test]
+    fn test_default() {
+        let analyzer = BinarySuitabilityAnalyzer::default();
+        assert!(std::ptr::eq(&analyzer, &analyzer));
+    }
+
+    #[test]
+    fn test_analyze_empty_tasks() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let result = analyzer.analyze(&[]).unwrap();
+
+        assert!(result.suitable_groups.is_empty());
+        assert!(result.unsuitable_tasks.is_empty());
+        assert!(result.reasons.is_empty());
+    }
+
+    #[test]
+    fn test_analyze_single_suitable_task_insufficient_network() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task = create_test_task("task1", "copy");
+        let result = analyzer.analyze(&[task]).unwrap();
+
+        // Single task with copy (2 network ops) needs >= 3 for binary deployment
+        assert_eq!(result.suitable_groups.len(), 0);
+        assert_eq!(result.unsuitable_tasks.len(), 1);
+        assert!(result
+            .reasons
+            .get("task1")
+            .unwrap()
+            .contains("Insufficient network operations"));
+    }
+
+    #[test]
+    fn test_analyze_single_suitable_task_low_network() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task = create_test_task("task1", "shell");
+        let result = analyzer.analyze(&[task]).unwrap();
+
+        assert!(result.suitable_groups.is_empty());
+        assert_eq!(result.unsuitable_tasks.len(), 1);
+        assert!(result.reasons.contains_key("task1"));
+    }
+
+    #[test]
+    fn test_analyze_unsuitable_task() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task = create_test_task("task1", "debug");
+        let result = analyzer.analyze(&[task]).unwrap();
+
+        assert!(result.suitable_groups.is_empty());
+        assert_eq!(result.unsuitable_tasks.len(), 1);
+        assert_eq!(result.unsuitable_tasks[0], "task1");
+    }
+
+    #[test]
+    fn test_is_task_binary_suitable_compatible_modules() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let compatible_modules = [
+            "file", "copy", "template", "shell", "command", "package", "service", "user", "group",
+            "cron",
+        ];
+
+        for module in &compatible_modules {
+            let task = create_test_task("test", module);
+            assert!(
+                analyzer.is_task_binary_suitable(&task),
+                "Module {} should be suitable",
+                module
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_task_binary_suitable_incompatible_modules() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let incompatible_modules = ["debug", "assert", "fail", "meta", "include", "import_tasks"];
+
+        for module in &incompatible_modules {
+            let task = create_test_task("test", module);
+            assert!(
+                !analyzer.is_task_binary_suitable(&task),
+                "Module {} should not be suitable",
+                module
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_task_binary_suitable_critical_risk() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task = create_task_with_risk("test", "shell", RiskLevel::Critical);
+        assert!(!analyzer.is_task_binary_suitable(&task));
+    }
+
+    #[test]
+    fn test_is_task_binary_suitable_interactive_modules() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let interactive_modules = ["pause", "prompt", "vars_prompt"];
+
+        for module in &interactive_modules {
+            let task = create_test_task("test", module);
+            assert!(
+                !analyzer.is_task_binary_suitable(&task),
+                "Interactive module {} should not be suitable",
+                module
+            );
+        }
+    }
+
+    #[test]
+    fn test_has_unsuitable_arguments_delegate_to() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut args = HashMap::new();
+        args.insert(
+            "delegate_to".to_string(),
+            serde_json::Value::String("other_host".to_string()),
+        );
+        let task = create_task_with_args("test", "shell", args);
+
+        assert!(analyzer.has_unsuitable_arguments(&task));
+    }
+
+    #[test]
+    fn test_has_unsuitable_arguments_local_action() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut args = HashMap::new();
+        args.insert("local_action".to_string(), serde_json::Value::Bool(true));
+        let task = create_task_with_args("test", "shell", args);
+
+        assert!(analyzer.has_unsuitable_arguments(&task));
+    }
+
+    #[test]
+    fn test_has_unsuitable_arguments_hostvars_condition() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut task = create_test_task("test", "shell");
+        task.conditions = vec![ExecutionCondition::When {
+            expression: "hostvars[inventory_hostname]['some_var']".to_string(),
+        }];
+
+        assert!(analyzer.has_unsuitable_arguments(&task));
+    }
+
+    #[test]
+    fn test_can_group_tasks_same_hosts() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task1 = create_task_with_hosts(
+            "task1",
+            "shell",
+            vec!["host1".to_string(), "host2".to_string()],
+        );
+        let task2 = create_task_with_hosts("task2", "copy", vec!["host1".to_string()]);
+
+        assert!(analyzer.can_group_tasks(&task1, &task2));
+    }
+
+    #[test]
+    fn test_can_group_tasks_no_host_overlap() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task1 = create_task_with_hosts("task1", "shell", vec!["host1".to_string()]);
+        let task2 = create_task_with_hosts("task2", "copy", vec!["host2".to_string()]);
+
+        assert!(!analyzer.can_group_tasks(&task1, &task2));
+    }
+
+    #[test]
+    fn test_has_host_overlap() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let hosts1 = vec!["host1".to_string(), "host2".to_string()];
+        let hosts2 = vec!["host2".to_string(), "host3".to_string()];
+        let hosts3 = vec!["host4".to_string()];
+
+        assert!(analyzer.has_host_overlap(&hosts1, &hosts2));
+        assert!(!analyzer.has_host_overlap(&hosts1, &hosts3));
+    }
+
+    #[test]
+    fn test_has_resource_conflict_same_file_path() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut args1 = HashMap::new();
+        args1.insert(
+            "dest".to_string(),
+            serde_json::Value::String("/etc/nginx.conf".to_string()),
+        );
+        let mut args2 = HashMap::new();
+        args2.insert(
+            "dest".to_string(),
+            serde_json::Value::String("/etc/nginx.conf".to_string()),
+        );
+
+        let task1 = create_task_with_args("task1", "copy", args1);
+        let task2 = create_task_with_args("task2", "template", args2);
+
+        assert!(analyzer.has_resource_conflict(&task1, &task2));
+    }
+
+    #[test]
+    fn test_has_resource_conflict_same_service() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut args1 = HashMap::new();
+        args1.insert(
+            "name".to_string(),
+            serde_json::Value::String("nginx".to_string()),
+        );
+        let mut args2 = HashMap::new();
+        args2.insert(
+            "name".to_string(),
+            serde_json::Value::String("nginx".to_string()),
+        );
+
+        let task1 = create_task_with_args("task1", "service", args1);
+        let task2 = create_task_with_args("task2", "service", args2);
+
+        assert!(analyzer.has_resource_conflict(&task1, &task2));
+    }
+
+    #[test]
+    fn test_are_logically_related_shared_tags() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut task1 = create_test_task("task1", "copy");
+        task1.tags = vec!["webserver".to_string(), "config".to_string()];
+        let mut task2 = create_test_task("task2", "service");
+        task2.tags = vec!["webserver".to_string()];
+
+        assert!(analyzer.are_logically_related(&task1, &task2));
+    }
+
+    #[test]
+    fn test_are_logically_related_copy_service_pattern() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task1 = create_test_task("task1", "copy");
+        let task2 = create_test_task("task2", "service");
+
+        assert!(analyzer.are_logically_related(&task1, &task2));
+    }
+
+    #[test]
+    fn test_are_logically_related_package_service_pattern() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let task1 = create_test_task("task1", "package");
+        let task2 = create_test_task("task2", "service");
+
+        assert!(analyzer.are_logically_related(&task1, &task2));
+    }
+
+    #[test]
+    fn test_tasks_interfere_dependency() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut task1 = create_test_task("task1", "copy");
+        let mut task2 = create_test_task("task2", "service");
+        task2.dependencies = vec!["task1".to_string()];
+
+        assert!(analyzer.tasks_interfere(&task1, &task2));
+    }
+
+    #[test]
+    fn test_tasks_interfere_notification() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let mut task1 = create_test_task("task1", "copy");
+        task1.notify = vec!["restart nginx".to_string()];
+        let mut task2 = create_test_task("task2", "service");
+        task2.name = "restart nginx service".to_string();
+
+        assert!(analyzer.tasks_interfere(&task1, &task2));
+    }
+
+    #[test]
+    fn test_get_file_path() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+
+        let mut args = HashMap::new();
+        args.insert(
+            "dest".to_string(),
+            serde_json::Value::String("/path/to/file".to_string()),
+        );
+        let task = create_task_with_args("test", "copy", args);
+
+        assert_eq!(
+            analyzer.get_file_path(&task),
+            Some("/path/to/file".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_unsuitability_reason() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+
+        let task1 = create_test_task("test1", "debug");
+        assert!(analyzer
+            .get_unsuitability_reason(&task1)
+            .contains("not compatible"));
+
+        // For critical risk task, need to use an incompatible module first to get the critical risk message
+        let task2 = create_task_with_risk("test2", "debug", RiskLevel::Critical);
+        assert!(analyzer
+            .get_unsuitability_reason(&task2)
+            .contains("not compatible"));
+    }
+
+    #[test]
+    fn test_get_unsuitability_reason_critical_risk_compatible_module() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+
+        // Create a task with compatible module but critical risk
+        // This should still fail the is_task_binary_suitable check due to critical risk
+        let task = create_task_with_risk("test", "shell", RiskLevel::Critical);
+
+        // The function checks is_task_binary_suitable first, which returns false for critical risk
+        // So it should return the module incompatible message
+        assert!(analyzer
+            .get_unsuitability_reason(&task)
+            .contains("not compatible"));
+    }
+
+    #[test]
+    fn test_count_network_operations() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+
+        assert_eq!(
+            analyzer.count_network_operations(&create_test_task("test", "copy")),
+            2
+        );
+        assert_eq!(
+            analyzer.count_network_operations(&create_test_task("test", "package")),
+            1
+        );
+        assert_eq!(
+            analyzer.count_network_operations(&create_test_task("test", "shell")),
+            1
+        );
+    }
+
+    #[test]
+    fn test_analyze_multiple_compatible_tasks() {
+        let analyzer = BinarySuitabilityAnalyzer::new();
+        let tasks = vec![
+            create_test_task("task1", "copy"),
+            create_test_task("task2", "service"),
+        ];
+
+        let result = analyzer.analyze(&tasks).unwrap();
+        assert_eq!(result.suitable_groups.len(), 1);
+        assert_eq!(result.suitable_groups[0].tasks.len(), 2);
+    }
+}

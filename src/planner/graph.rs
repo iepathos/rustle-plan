@@ -147,7 +147,7 @@ mod tests {
     fn create_test_task(id: &str, module: &str) -> TaskPlan {
         TaskPlan {
             task_id: id.to_string(),
-            name: format!("Test Task {}", id),
+            name: format!("Test Task {id}"),
             module: module.to_string(),
             args: HashMap::new(),
             hosts: vec!["host1".to_string()],
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let builder = DependencyGraphBuilder::default();
+        let builder = DependencyGraphBuilder;
         assert!(std::ptr::eq(&builder, &builder));
     }
 

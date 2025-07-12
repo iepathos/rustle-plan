@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let evaluator = ConditionEvaluator::default();
+        let evaluator = ConditionEvaluator;
         assert!(std::ptr::eq(&evaluator, &evaluator));
     }
 

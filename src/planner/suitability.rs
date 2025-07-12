@@ -262,7 +262,7 @@ mod tests {
     fn create_test_task(id: &str, module: &str) -> TaskPlan {
         TaskPlan {
             task_id: id.to_string(),
-            name: format!("Test Task {}", id),
+            name: format!("Test Task {id}"),
             module: module.to_string(),
             args: HashMap::new(),
             hosts: vec!["host1".to_string()],
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let analyzer = BinarySuitabilityAnalyzer::default();
+        let analyzer = BinarySuitabilityAnalyzer;
         assert!(std::ptr::eq(&analyzer, &analyzer));
     }
 
@@ -371,8 +371,7 @@ mod tests {
             let task = create_test_task("test", module);
             assert!(
                 analyzer.is_task_binary_suitable(&task),
-                "Module {} should be suitable",
-                module
+                "Module {module} should be suitable"
             );
         }
     }
@@ -386,8 +385,7 @@ mod tests {
             let task = create_test_task("test", module);
             assert!(
                 !analyzer.is_task_binary_suitable(&task),
-                "Module {} should not be suitable",
-                module
+                "Module {module} should not be suitable"
             );
         }
     }
@@ -408,8 +406,7 @@ mod tests {
             let task = create_test_task("test", module);
             assert!(
                 !analyzer.is_task_binary_suitable(&task),
-                "Interactive module {} should not be suitable",
-                module
+                "Interactive module {module} should not be suitable"
             );
         }
     }

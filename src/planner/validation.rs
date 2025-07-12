@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_default() {
-        let validator = PlanValidator::default();
+        let validator = PlanValidator;
         assert!(std::ptr::eq(&validator, &validator));
     }
 

@@ -8,6 +8,7 @@ use tracing::{error, info};
 #[derive(Parser)]
 #[command(
     name = "rustle-plan",
+    version,
     about = "Generate optimized execution plans from parsed playbooks",
     long_about = "The rustle-plan tool takes parsed playbooks and generates optimized execution plans with binary deployment strategies. It analyzes task dependencies, determines parallelization opportunities, and produces detailed execution graphs."
 )]

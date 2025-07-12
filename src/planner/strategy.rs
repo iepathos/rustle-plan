@@ -163,3 +163,256 @@ impl Default for StrategyPlanner {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn create_test_task(id: &str, can_parallel: bool) -> TaskPlan {
+        TaskPlan {
+            task_id: id.to_string(),
+            name: format!("Test task {}", id),
+            module: "shell".to_string(),
+            args: std::collections::HashMap::new(),
+            hosts: vec!["host1".to_string()],
+            dependencies: Vec::new(),
+            conditions: Vec::new(),
+            tags: Vec::new(),
+            notify: Vec::new(),
+            execution_order: 0,
+            can_run_parallel: can_parallel,
+            estimated_duration: Some(Duration::from_secs(1)),
+            risk_level: RiskLevel::Low,
+        }
+    }
+
+    #[test]
+    fn test_new_and_default() {
+        let planner1 = StrategyPlanner::new();
+        let planner2 = StrategyPlanner::default();
+
+        // Both should create instances successfully
+        let _ = (planner1, planner2);
+    }
+
+    #[test]
+    fn test_plan_linear_strategy() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![
+            create_test_task("task1", true),
+            create_test_task("task2", true),
+            create_test_task("task3", false),
+        ];
+        let hosts = vec!["host1".to_string(), "host2".to_string()];
+
+        let batches = planner.plan_linear(&tasks, &hosts);
+
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].batch_id, "linear-batch-0");
+        assert_eq!(batches[1].batch_id, "linear-batch-1");
+        assert_eq!(batches[2].batch_id, "linear-batch-2");
+
+        // Each batch should have one task
+        for (i, batch) in batches.iter().enumerate() {
+            assert_eq!(batch.tasks.len(), 1);
+            assert_eq!(batch.tasks[0].task_id, format!("task{}", i + 1));
+            assert_eq!(batch.hosts, hosts);
+        }
+
+        // Check dependencies
+        assert!(batches[0].dependencies.is_empty());
+        assert_eq!(batches[1].dependencies, vec!["linear-batch-0"]);
+        assert_eq!(batches[2].dependencies, vec!["linear-batch-1"]);
+    }
+
+    #[test]
+    fn test_plan_free_strategy() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![
+            create_test_task("task1", true),
+            create_test_task("task2", true),
+            create_test_task("task3", false),
+            create_test_task("task4", false),
+        ];
+        let hosts = vec!["host1".to_string(), "host2".to_string()];
+
+        let batches = planner.plan_free(&tasks, &hosts);
+
+        // Should have one parallel batch and two sequential batches
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].batch_id, "free-parallel");
+        assert_eq!(batches[0].tasks.len(), 2); // Two parallel tasks
+
+        assert_eq!(batches[1].batch_id, "free-sequential-0");
+        assert_eq!(batches[1].tasks.len(), 1);
+        assert_eq!(batches[1].dependencies, vec!["free-parallel"]);
+
+        assert_eq!(batches[2].batch_id, "free-sequential-1");
+        assert_eq!(batches[2].tasks.len(), 1);
+        assert_eq!(batches[2].dependencies, vec!["free-sequential-0"]);
+    }
+
+    #[test]
+    fn test_plan_free_strategy_only_sequential() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![
+            create_test_task("task1", false),
+            create_test_task("task2", false),
+        ];
+        let hosts = vec!["host1".to_string()];
+
+        let batches = planner.plan_free(&tasks, &hosts);
+
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].batch_id, "free-sequential-0");
+        assert!(batches[0].dependencies.is_empty());
+
+        assert_eq!(batches[1].batch_id, "free-sequential-1");
+        assert_eq!(batches[1].dependencies, vec!["free-sequential-0"]);
+    }
+
+    #[test]
+    fn test_plan_rolling_strategy() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![
+            create_test_task("task1", true),
+            create_test_task("task2", true),
+        ];
+        let hosts = vec![
+            "host1".to_string(),
+            "host2".to_string(),
+            "host3".to_string(),
+            "host4".to_string(),
+            "host5".to_string(),
+        ];
+
+        let batches = planner.plan_rolling(&tasks, &hosts, 2);
+
+        // With 5 hosts and batch size 2, should have 3 batches
+        assert_eq!(batches.len(), 3);
+
+        // First batch should have 2 hosts
+        assert_eq!(batches[0].batch_id, "rolling-0");
+        assert_eq!(batches[0].hosts, vec!["host1", "host2"]);
+        assert_eq!(batches[0].tasks.len(), 2);
+        assert!(batches[0].dependencies.is_empty());
+
+        // Second batch should have 2 hosts
+        assert_eq!(batches[1].batch_id, "rolling-1");
+        assert_eq!(batches[1].hosts, vec!["host3", "host4"]);
+        assert_eq!(batches[1].dependencies, vec!["rolling-0"]);
+
+        // Third batch should have 1 host
+        assert_eq!(batches[2].batch_id, "rolling-2");
+        assert_eq!(batches[2].hosts, vec!["host5"]);
+        assert_eq!(batches[2].dependencies, vec!["rolling-1"]);
+    }
+
+    #[test]
+    fn test_plan_host_pinned_strategy() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![
+            create_test_task("task1", true),
+            create_test_task("task2", false),
+        ];
+        let hosts = vec![
+            "host1".to_string(),
+            "host2".to_string(),
+            "host3".to_string(),
+        ];
+
+        let batches = planner.plan_host_pinned(&tasks, &hosts);
+
+        // Should have one batch per host
+        assert_eq!(batches.len(), 3);
+
+        for (i, batch) in batches.iter().enumerate() {
+            assert_eq!(batch.batch_id, format!("host-{}", i));
+            assert_eq!(batch.hosts, vec![format!("host{}", i + 1)]);
+            assert_eq!(batch.tasks.len(), 2); // Each host gets all tasks
+            assert!(batch.dependencies.is_empty()); // Host-pinned runs in parallel
+
+            // Verify tasks are assigned to correct host
+            for task in &batch.tasks {
+                assert_eq!(task.hosts, vec![format!("host{}", i + 1)]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_plan_binary_hybrid_strategy() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![create_test_task("task1", true)];
+        let hosts = vec!["host1".to_string()];
+
+        // Binary hybrid should currently use linear strategy
+        let batches = planner.plan_binary_hybrid(&tasks, &hosts);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].batch_id, "linear-batch-0");
+    }
+
+    #[test]
+    fn test_plan_binary_only_strategy() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![create_test_task("task1", true)];
+        let hosts = vec!["host1".to_string()];
+
+        // Binary only should currently use linear strategy
+        let batches = planner.plan_binary_only(&tasks, &hosts);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].batch_id, "linear-batch-0");
+    }
+
+    #[test]
+    fn test_plan_strategy_all_variants() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![
+            create_test_task("task1", true),
+            create_test_task("task2", false),
+        ];
+        let hosts = vec!["host1".to_string(), "host2".to_string()];
+
+        let strategies = vec![
+            ExecutionStrategy::Linear,
+            ExecutionStrategy::Free,
+            ExecutionStrategy::Rolling { batch_size: 1 },
+            ExecutionStrategy::HostPinned,
+            ExecutionStrategy::BinaryHybrid,
+            ExecutionStrategy::BinaryOnly,
+        ];
+
+        for strategy in strategies {
+            let batches = planner.plan_strategy(&strategy, &tasks, &hosts);
+            assert!(
+                !batches.is_empty(),
+                "Strategy {:?} produced no batches",
+                strategy
+            );
+        }
+    }
+
+    #[test]
+    fn test_empty_tasks() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![];
+        let hosts = vec!["host1".to_string()];
+
+        let batches = planner.plan_linear(&tasks, &hosts);
+        assert!(batches.is_empty());
+
+        let batches = planner.plan_free(&tasks, &hosts);
+        assert!(batches.is_empty());
+    }
+
+    #[test]
+    fn test_single_host() {
+        let planner = StrategyPlanner::new();
+        let tasks = vec![create_test_task("task1", true)];
+        let hosts = vec!["host1".to_string()];
+
+        let batches = planner.plan_strategy(&ExecutionStrategy::Linear, &tasks, &hosts);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].hosts, vec!["host1"]);
+    }
+}

@@ -132,8 +132,12 @@ fn main() -> Result<()> {
 
     // Initialize tracing - suppress logging if outputting JSON to stdout
     // This prevents log messages from interfering with piped JSON output
-    let should_log = !(matches!(cli.output, OutputFormat::Json) && !cli.list_tasks && !cli.list_hosts && !cli.list_binaries && !cli.dry_run);
-    
+    let should_log = !(matches!(cli.output, OutputFormat::Json)
+        && !cli.list_tasks
+        && !cli.list_hosts
+        && !cli.list_binaries
+        && !cli.dry_run);
+
     if should_log {
         let level = if cli.verbose {
             tracing::Level::DEBUG

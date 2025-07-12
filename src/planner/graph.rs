@@ -254,7 +254,9 @@ mod tests {
     fn test_find_parallel_groups_single_task() {
         let builder = DependencyGraphBuilder::new();
         let task = create_test_task("task1", "shell");
-        let graph = builder.build_from_tasks(&[task.clone()]).unwrap();
+        let graph = builder
+            .build_from_tasks(std::slice::from_ref(&task))
+            .unwrap();
         let groups = builder.find_parallel_groups(&[task], &graph);
 
         assert!(groups.is_empty());

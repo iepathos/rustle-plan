@@ -51,7 +51,7 @@ fn test_cli_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Generate optimized execution plans",
+            "generates optimized execution plans",
         ));
 }
 

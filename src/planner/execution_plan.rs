@@ -137,7 +137,7 @@ impl ExecutionPlanner {
         let execution_plan = ExecutionPlan {
             metadata: PlanMetadata {
                 created_at: Utc::now(),
-                rustle_version: env!("CARGO_PKG_VERSION").to_string(),
+                rustle_plan_version: env!("CARGO_PKG_VERSION").to_string(),
                 playbook_hash: self.calculate_playbook_hash(playbook)?,
                 inventory_hash: self.calculate_inventory_hash(inventory)?,
                 planning_options: options.clone(),

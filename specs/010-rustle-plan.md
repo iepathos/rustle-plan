@@ -91,7 +91,7 @@ pub struct ExecutionPlan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanMetadata {
     pub created_at: DateTime&lt;Utc&gt;,
-    pub rustle_version: String,
+    pub rustle_plan_version: String,
     pub playbook_hash: String,
     pub inventory_hash: String,
     pub planning_options: PlanningOptions,

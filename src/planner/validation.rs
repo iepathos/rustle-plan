@@ -130,7 +130,7 @@ mod tests {
         ExecutionPlan {
             metadata: PlanMetadata {
                 created_at: Utc::now(),
-                rustle_version: "1.0.0".to_string(),
+                rustle_plan_version: "1.0.0".to_string(),
                 playbook_hash: "abc123".to_string(),
                 inventory_hash: "def456".to_string(),
                 planning_options: PlanningOptions {

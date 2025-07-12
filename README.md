@@ -224,7 +224,7 @@ The tool outputs detailed execution plans in JSON format by default:
 {
   "metadata": {
     "created_at": "2025-07-11T01:08:23.589337Z",
-    "rustle_version": "0.1.0",
+    "rustle_plan_version": "0.1.0",
     "playbook_hash": "785bab203c116d67dcacce745579fcbd",
     "inventory_hash": "653a2ee28be80c8e41d5251b3923d10d",
     "planning_options": {

@@ -1,0 +1,84 @@
+{
+  "metadata": {
+    "file_path": "tests/fixtures/playbooks/system-facts-playbook.yml",
+    "version": null,
+    "created_at": "2025-07-12T21:49:42.908465Z",
+    "checksum": "6dc9ca8307b63431f583dc81903f32d46def91875653464c5a8297797eb385ad"
+  },
+  "plays": [
+    {
+      "name": "System facts gathering playbook",
+      "hosts": null,
+      "vars": {},
+      "tasks": [
+        {
+          "id": "task_0",
+          "name": "Gather system facts",
+          "module": "setup",
+          "args": {
+            "gather_subset": "all",
+            "gather_timeout": 10
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [
+            "facts",
+            "setup",
+            "system"
+          ],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_1",
+          "name": "Display gathered facts",
+          "module": "debug",
+          "args": {
+            "msg": "System: , OS Family: , Architecture: "
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_2",
+          "name": "Task for Linux systems only",
+          "module": "debug",
+          "args": {
+            "msg": "This is a Linux system with  CPU cores"
+          },
+          "vars": {},
+          "when": "ansible_system == \"Linux\"",
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        }
+      ],
+      "handlers": [],
+      "roles": [],
+      "strategy": "linear",
+      "serial": null,
+      "max_fail_percentage": null
+    }
+  ],
+  "variables": {},
+  "facts_required": true,
+  "vault_ids": []
+}

@@ -130,14 +130,18 @@ enum OutputFormat {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize tracing
-    let level = if cli.verbose {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    };
-
-    tracing_subscriber::fmt().with_max_level(level).init();
+    // Initialize tracing - suppress logging if outputting JSON to stdout
+    // This prevents log messages from interfering with piped JSON output
+    let should_log = !(matches!(cli.output, OutputFormat::Json) && !cli.list_tasks && !cli.list_hosts && !cli.list_binaries && !cli.dry_run);
+    
+    if should_log {
+        let level = if cli.verbose {
+            tracing::Level::DEBUG
+        } else {
+            tracing::Level::INFO
+        };
+        tracing_subscriber::fmt().with_max_level(level).init();
+    }
 
     // Read playbook input
     let playbook_content = if let Some(ref path) = cli.playbook {

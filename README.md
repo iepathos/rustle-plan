@@ -1,5 +1,9 @@
 # rustle-plan
 
+[![CI](https://github.com/iepathos/rustle-plan/actions/workflows/ci.yml/badge.svg)](https://github.com/iepathos/rustle-plan/actions/workflows/ci.yml)
+[![Security](https://github.com/iepathos/rustle-plan/actions/workflows/security.yml/badge.svg)](https://github.com/iepathos/rustle-plan/actions/workflows/security.yml)
+[![Release](https://github.com/iepathos/rustle-plan/actions/workflows/release.yml/badge.svg)](https://github.com/iepathos/rustle-plan/actions/workflows/release.yml)
+
 A specialized execution planner for the Rustle automation ecosystem that generates optimized execution plans with binary deployment strategies. This tool takes parsed playbooks from `rustle-parse` and produces detailed execution plans that optimize for minimal network overhead through intelligent parallelization and binary deployment planning.
 
 ## 🚀 Features

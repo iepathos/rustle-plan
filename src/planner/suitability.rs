@@ -553,7 +553,7 @@ mod tests {
     #[test]
     fn test_tasks_interfere_dependency() {
         let analyzer = BinarySuitabilityAnalyzer::new();
-        let mut task1 = create_test_task("task1", "copy");
+        let task1 = create_test_task("task1", "copy");
         let mut task2 = create_test_task("task2", "service");
         task2.dependencies = vec!["task1".to_string()];
 

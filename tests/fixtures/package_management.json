@@ -1,0 +1,117 @@
+{
+  "metadata": {
+    "file_path": "tests/fixtures/playbooks/package_management.yml",
+    "version": null,
+    "created_at": "2025-07-13T01:35:31.854288Z",
+    "checksum": "30ba4c15dd149daf52804ea3a50b26af9790321257dff904b1d3abb225c3f74c"
+  },
+  "plays": [
+    {
+      "name": "Package management test",
+      "hosts": "test_hosts",
+      "vars": {},
+      "tasks": [
+        {
+          "id": "task_0",
+          "name": "Update package cache (Debian/Ubuntu)",
+          "module": "apt",
+          "args": {
+            "update_cache": true
+          },
+          "vars": {},
+          "when": "ansible_os_family == \"Debian\"",
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_1",
+          "name": "Install curl package",
+          "module": "package",
+          "args": {
+            "state": "present",
+            "name": "curl"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_2",
+          "name": "Install wget package",
+          "module": "package",
+          "args": {
+            "state": "present",
+            "name": "wget"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_3",
+          "name": "Verify curl is installed",
+          "module": "command",
+          "args": {
+            "_raw_params": "which curl"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": false,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_4",
+          "name": "Verify wget is installed",
+          "module": "command",
+          "args": {
+            "_raw_params": "which wget"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": false,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        }
+      ],
+      "handlers": [],
+      "roles": [],
+      "strategy": "linear",
+      "serial": null,
+      "max_fail_percentage": null
+    }
+  ],
+  "variables": {},
+  "facts_required": false,
+  "vault_ids": []
+}

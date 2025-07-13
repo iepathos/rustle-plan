@@ -2,15 +2,20 @@
 
 ## Feature Summary
 
-This feature enhances rustle-plan to automatically detect and include target OS and architecture information in the execution plan output. This enables rustle-deploy to compile appropriate binaries for deployment targets without making assumptions about the target systems. The feature analyzes inventory host information and determines the correct compilation targets (OS and architecture) for each binary deployment plan.
+This feature enhances rustle-plan to include target OS and architecture information in the execution plan output. Since standard Ansible inventories don't contain system facts (OS/architecture), this feature implements a flexible approach using sensible defaults with multiple override mechanisms. This enables rustle-deploy to compile appropriate binaries for deployment targets without making assumptions about the target systems.
 
 ## Goals & Requirements
 
 ### Functional Requirements
-- Detect target OS and architecture from inventory host information
+- Provide sensible default target architecture (x86_64-linux)
+- Support multiple override mechanisms for specifying targets:
+  - Command-line flags
+  - Inventory variables
+  - Configuration file
+  - Fact cache integration (optional)
 - Include compilation target details in each BinaryDeploymentPlan
 - Support multiple architecture targets within a single execution plan
-- Provide fallback defaults when target information cannot be determined
+- Support per-host and per-group target specifications
 - Maintain backward compatibility with existing execution plan format
 
 ### Non-Functional Requirements
@@ -21,10 +26,11 @@ This feature enhances rustle-plan to automatically detect and include target OS 
 - Extensible design for adding new target platforms
 
 ### Success Criteria
-- Rustle-deploy can successfully compile binaries for detected targets
+- Rustle-deploy can successfully compile binaries for specified targets
 - Each binary deployment includes accurate target architecture information
 - Mixed architecture deployments are properly handled
-- Fallback behavior works correctly when detection fails
+- Default behavior works correctly when no target is specified
+- Override mechanisms work at all levels (global, group, host)
 
 ## API/Interface Design
 
@@ -46,12 +52,14 @@ pub struct CompilationRequirements {
 }
 ```
 
-### New Target Detection Module
+### New Target Resolution Module
 ```rust
-// src/planner/target_detection.rs
-pub struct TargetDetector {
-    inventory_facts: HashMap<String, HostFacts>,
+// src/planner/target_resolution.rs
+pub struct TargetResolver {
     default_target: TargetInfo,
+    global_override: Option<TargetInfo>,
+    inventory_overrides: HashMap<String, TargetInfo>,
+    fact_cache: Option<FactCache>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,18 +69,16 @@ pub struct TargetInfo {
     pub triple: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct HostFacts {
-    pub ansible_architecture: Option<String>,
-    pub ansible_machine: Option<String>,
-    pub ansible_system: Option<String>,
-    pub ansible_os_family: Option<String>,
-    pub ansible_distribution: Option<String>,
+#[derive(Debug, Clone)]
+pub struct TargetOverrides {
+    pub global_arch: Option<String>,
+    pub global_os: Option<String>,
+    pub fact_cache_path: Option<PathBuf>,
 }
 
-impl TargetDetector {
-    pub fn new(inventory: &ParsedInventory) -> Self;
-    pub fn detect_target_for_hosts(&self, hosts: &[String]) -> Result<TargetInfo, PlanError>;
+impl TargetResolver {
+    pub fn new(inventory: &ParsedInventory, overrides: TargetOverrides) -> Self;
+    pub fn resolve_target_for_hosts(&self, hosts: &[String]) -> Result<TargetInfo, PlanError>;
     pub fn normalize_architecture(&self, arch: &str) -> String;
     pub fn normalize_os(&self, os: &str) -> String;
     pub fn build_target_triple(&self, arch: &str, os: &str) -> Option<String>;
@@ -82,42 +88,117 @@ impl TargetDetector {
 ### Integration with BinaryDeploymentPlanner
 ```rust
 impl BinaryDeploymentPlanner {
-    // Updated to accept target detector
+    // Updated to accept target resolver
     pub fn create_compilation_requirements(
         &self, 
         hosts: &[String],
-        target_detector: &TargetDetector
+        target_resolver: &TargetResolver
     ) -> Result<CompilationRequirements, PlanError>;
+}
+```
+
+### Command-line Interface Updates
+```rust
+// Add to rustle-plan CLI arguments
+#[derive(Parser)]
+struct Args {
+    // ... existing args ...
+    
+    /// Target architecture for binary compilation (default: x86_64)
+    #[arg(long, env = "RUSTLE_TARGET_ARCH")]
+    target_arch: Option<String>,
+    
+    /// Target OS for binary compilation (default: linux)
+    #[arg(long, env = "RUSTLE_TARGET_OS")]
+    target_os: Option<String>,
+    
+    /// Path to Ansible fact cache for automatic target detection
+    #[arg(long, env = "RUSTLE_FACT_CACHE")]
+    fact_cache: Option<PathBuf>,
 }
 ```
 
 ## File and Package Structure
 
 ### New Files
-- `src/planner/target_detection.rs` - Core target detection logic
-- `tests/target_detection_tests.rs` - Unit tests for target detection
+- `src/planner/target_resolution.rs` - Core target resolution logic
+- `src/planner/fact_cache.rs` - Optional fact cache integration
+- `tests/target_resolution_tests.rs` - Unit tests for target resolution
 
 ### Modified Files
-- `src/planner/binary_deployment.rs` - Update to use target detection
-- `src/types/plan.rs` - Update CompilationRequirements structure
-- `src/planner/mod.rs` - Export target detection module
-- `src/planner/execution_plan.rs` - Pass inventory data to binary planner
+- `src/planner/binary_deployment.rs` - Update to use target resolution
+- `src/types/plan.rs` - Update CompilationRequirements structure  
+- `src/planner/mod.rs` - Export target resolution module
+- `src/planner/execution_plan.rs` - Pass target resolver to binary planner
+- `src/bin/rustle-plan.rs` - Add CLI arguments for target specification
 
 ## Implementation Details
 
-### Step 1: Create Target Detection Module
+### Step 1: Target Resolution Priority
+
+The target resolver will use the following priority order:
+1. **Host-specific variables** in inventory (highest priority)
+   - `host1 ansible_architecture=aarch64 ansible_system=Linux`
+2. **Group variables** in inventory
+   - `[webservers:vars]`
+   - `ansible_architecture=x86_64`
+3. **Command-line overrides**
+   - `--target-arch x86_64 --target-os linux`
+4. **Fact cache** (if available and path provided)
+   - Read from Ansible's JSON fact cache
+5. **Default values** (lowest priority)
+   - Architecture: `x86_64`
+   - OS: `linux`
+
+### Step 2: Create Target Resolution Module
 ```rust
-// src/planner/target_detection.rs
+// src/planner/target_resolution.rs
 use std::collections::HashMap;
+use std::path::PathBuf;
 use crate::types::*;
 use crate::planner::error::PlanError;
 
-impl TargetDetector {
-    pub fn new(inventory: &ParsedInventory) -> Self {
-        let inventory_facts = Self::extract_host_facts(inventory);
+impl TargetResolver {
+    pub fn new(inventory: &ParsedInventory, overrides: TargetOverrides) -> Self {
+        let mut inventory_overrides = HashMap::new();
+        
+        // Extract target info from inventory variables
+        for host in &inventory.hosts {
+            if let Some(host_vars) = inventory.vars.get(host) {
+                if let Some(target) = Self::extract_target_from_vars(host_vars) {
+                    inventory_overrides.insert(host.clone(), target);
+                }
+            }
+        }
+        
+        // Also check group variables
+        for (group, hosts) in &inventory.groups {
+            if let Some(group_vars) = inventory.vars.get(group) {
+                if let Some(target) = Self::extract_target_from_vars(group_vars) {
+                    // Apply to all hosts in group that don't have host-specific overrides
+                    for host in hosts {
+                        inventory_overrides.entry(host.clone()).or_insert(target.clone());
+                    }
+                }
+            }
+        }
+        
+        let global_override = match (overrides.global_arch, overrides.global_os) {
+            (Some(arch), Some(os)) => Some(TargetInfo {
+                arch,
+                os,
+                triple: None,
+            }),
+            _ => None,
+        };
+        
+        let fact_cache = overrides.fact_cache_path
+            .and_then(|path| FactCache::load(&path).ok());
         
         Self {
-            inventory_facts,
+            inventory_overrides,
+            global_override,
+            fact_cache,
             default_target: TargetInfo {
                 arch: "x86_64".to_string(),
                 os: "linux".to_string(),
@@ -126,71 +207,80 @@ impl TargetDetector {
         }
     }
     
-    fn extract_host_facts(inventory: &ParsedInventory) -> HashMap<String, HostFacts> {
-        let mut facts = HashMap::new();
-        
-        // Extract facts from inventory variables
-        for host in &inventory.hosts {
-            if let Some(host_vars) = inventory.vars.get(host) {
-                if let Ok(host_facts) = serde_json::from_value::<HostFacts>(host_vars.clone()) {
-                    facts.insert(host.clone(), host_facts);
-                }
-            }
+    fn extract_target_from_vars(vars: &serde_json::Value) -> Option<TargetInfo> {
+        let arch = vars.get("ansible_architecture")
+            .or_else(|| vars.get("ansible_machine"))
+            .and_then(|v| v.as_str());
+            
+        let os = vars.get("ansible_system")
+            .or_else(|| vars.get("ansible_os_family"))
+            .and_then(|v| v.as_str());
+            
+        match (arch, os) {
+            (Some(a), Some(o)) => Some(TargetInfo {
+                arch: a.to_string(),
+                os: o.to_string(),
+                triple: None,
+            }),
+            _ => None,
         }
-        
-        facts
     }
     
-    pub fn detect_target_for_hosts(&self, hosts: &[String]) -> Result<TargetInfo, PlanError> {
-        // Collect all unique targets for the given hosts
-        let mut targets = HashMap::new();
+    pub fn resolve_target_for_hosts(&self, hosts: &[String]) -> Result<TargetInfo, PlanError> {
+        // Priority order for resolution
+        let mut target_counts: HashMap<String, (TargetInfo, usize)> = HashMap::new();
         
         for host in hosts {
-            if let Some(facts) = self.inventory_facts.get(host) {
-                let arch = self.detect_architecture(facts);
-                let os = self.detect_os(facts);
-                let key = format!("{}-{}", arch, os);
-                
-                targets.entry(key).or_insert(TargetInfo {
-                    arch: arch.clone(),
-                    os: os.clone(),
-                    triple: self.build_target_triple(&arch, &os),
-                });
-            }
+            let target = self.resolve_target_for_host(host)?;
+            let key = format!("{}-{}", target.arch, target.os);
+            
+            target_counts.entry(key)
+                .and_modify(|(_, count)| *count += 1)
+                .or_insert((target, 1));
         }
         
-        // If no targets detected, use default
-        if targets.is_empty() {
-            return Ok(self.default_target.clone());
+        // If no hosts specified, use global override or default
+        if hosts.is_empty() {
+            return Ok(self.global_override.clone()
+                .unwrap_or_else(|| self.default_target.clone()));
         }
         
-        // If multiple targets, select the most common one
-        // In a real implementation, might want to handle this differently
-        let (_, target) = targets.into_iter()
-            .max_by_key(|(_, _)| 1) // Simplified - would count occurrences
-            .unwrap();
+        // Return the most common target among the hosts
+        let (_, (target, _)) = target_counts.into_iter()
+            .max_by_key(|(_, (_, count))| *count)
+            .ok_or_else(|| PlanError::ValidationError("No targets resolved".to_string()))?;
             
         Ok(target)
     }
     
-    fn detect_architecture(&self, facts: &HostFacts) -> String {
-        // Try ansible_architecture first, then ansible_machine
-        let raw_arch = facts.ansible_architecture.as_ref()
-            .or(facts.ansible_machine.as_ref())
-            .map(|s| s.as_str())
-            .unwrap_or("x86_64");
-            
-        self.normalize_architecture(raw_arch)
+    fn resolve_target_for_host(&self, host: &str) -> Result<TargetInfo, PlanError> {
+        // Priority order:
+        // 1. Host-specific inventory override
+        if let Some(target) = self.inventory_overrides.get(host) {
+            return Ok(self.normalize_target(target.clone()));
+        }
+        
+        // 2. Fact cache (if available)
+        if let Some(fact_cache) = &self.fact_cache {
+            if let Some(target) = fact_cache.get_target_for_host(host) {
+                return Ok(self.normalize_target(target));
+            }
+        }
+        
+        // 3. Global override
+        if let Some(target) = &self.global_override {
+            return Ok(self.normalize_target(target.clone()));
+        }
+        
+        // 4. Default
+        Ok(self.default_target.clone())
     }
     
-    fn detect_os(&self, facts: &HostFacts) -> String {
-        // Try ansible_system first, then ansible_os_family
-        let raw_os = facts.ansible_system.as_ref()
-            .or(facts.ansible_os_family.as_ref())
-            .map(|s| s.as_str())
-            .unwrap_or("Linux");
-            
-        self.normalize_os(raw_os)
+    fn normalize_target(&self, mut target: TargetInfo) -> TargetInfo {
+        target.arch = self.normalize_architecture(&target.arch);
+        target.os = self.normalize_os(&target.os);
+        target.triple = self.build_target_triple(&target.arch, &target.os);
+        target
     }
     
     pub fn normalize_architecture(&self, arch: &str) -> String {
@@ -228,7 +318,51 @@ impl TargetDetector {
 }
 ```
 
-### Step 2: Update BinaryDeploymentPlanner
+### Step 3: Fact Cache Integration (Optional)
+```rust
+// src/planner/fact_cache.rs
+use std::path::Path;
+use std::collections::HashMap;
+use serde_json::Value;
+
+pub struct FactCache {
+    facts: HashMap<String, Value>,
+}
+
+impl FactCache {
+    pub fn load(path: &Path) -> Result<Self, PlanError> {
+        // Support JSON fact cache format
+        let content = std::fs::read_to_string(path)?;
+        let facts: HashMap<String, Value> = serde_json::from_str(&content)?;
+        Ok(Self { facts })
+    }
+    
+    pub fn get_target_for_host(&self, host: &str) -> Option<TargetInfo> {
+        let host_facts = self.facts.get(host)?;
+        
+        let arch = host_facts.get("ansible_facts")
+            .and_then(|f| f.get("ansible_architecture"))
+            .or_else(|| host_facts.get("ansible_architecture"))
+            .and_then(|v| v.as_str());
+            
+        let os = host_facts.get("ansible_facts")
+            .and_then(|f| f.get("ansible_system"))
+            .or_else(|| host_facts.get("ansible_system"))
+            .and_then(|v| v.as_str());
+            
+        match (arch, os) {
+            (Some(a), Some(o)) => Some(TargetInfo {
+                arch: a.to_string(),
+                os: o.to_string(),
+                triple: None,
+            }),
+            _ => None,
+        }
+    }
+}
+```
+
+### Step 4: Update BinaryDeploymentPlanner
 ```rust
 // Updates to src/planner/binary_deployment.rs
 impl BinaryDeploymentPlanner {
@@ -236,7 +370,7 @@ impl BinaryDeploymentPlanner {
         &self,
         group: &TaskGroup,
         hosts: &[String],
-        target_detector: &TargetDetector,
+        target_resolver: &TargetResolver,
     ) -> Result<BinaryDeployment, PlanError> {
         let deployment_hosts: Vec<String> = hosts
             .iter()
@@ -250,7 +384,7 @@ impl BinaryDeploymentPlanner {
         // Use target detector for compilation requirements
         let compilation_requirements = self.create_compilation_requirements(
             &deployment_hosts,
-            target_detector
+            target_resolver
         )?;
 
         Ok(BinaryDeployment {
@@ -269,9 +403,9 @@ impl BinaryDeploymentPlanner {
     fn create_compilation_requirements(
         &self,
         hosts: &[String],
-        target_detector: &TargetDetector,
+        target_resolver: &TargetResolver,
     ) -> Result<CompilationRequirements, PlanError> {
-        let target_info = target_detector.detect_target_for_hosts(hosts)?;
+        let target_info = target_resolver.detect_target_for_hosts(hosts)?;
         
         Ok(CompilationRequirements {
             target_arch: target_info.arch,
@@ -306,27 +440,32 @@ impl BinaryDeploymentPlanner {
 }
 ```
 
-### Step 3: Update ExecutionPlanBuilder
+### Step 5: Update ExecutionPlanBuilder
 ```rust
 // Updates to src/planner/execution_plan.rs
-use crate::planner::target_detection::TargetDetector;
+use crate::planner::target_resolution::{TargetResolver, TargetOverrides};
 
 impl ExecutionPlanBuilder {
     pub fn build(&self, playbook: ParsedPlaybook, inventory: ParsedInventory) -> Result<ExecutionPlan, PlanError> {
-        // Create target detector from inventory
-        let target_detector = TargetDetector::new(&inventory);
+        // Create target resolver from inventory and CLI options
+        let target_overrides = TargetOverrides {
+            global_arch: self.options.target_arch.clone(),
+            global_os: self.options.target_os.clone(),
+            fact_cache_path: self.options.fact_cache_path.clone(),
+        };
+        let target_resolver = TargetResolver::new(&inventory, target_overrides);
         
         // ... existing code ...
         
-        // Pass target detector to binary deployment planning
+        // Pass target resolver to binary deployment planning
         let binary_deployments = if self.options.force_ssh {
             Vec::new()
         } else {
-            self.binary_planner.plan_deployments_with_detector(
+            self.binary_planner.plan_deployments_with_resolver(
                 &all_tasks,
                 &all_hosts,
                 self.options.binary_threshold,
-                &target_detector,
+                &target_resolver,
             )?
         };
         
@@ -339,55 +478,55 @@ impl ExecutionPlanBuilder {
 
 ### Unit Tests
 ```rust
-// tests/target_detection_tests.rs
+// tests/target_resolution_tests.rs
 #[cfg(test)]
 mod tests {
     use super::*;
     
     #[test]
     fn test_architecture_normalization() {
-        let detector = TargetDetector::new(&ParsedInventory::default());
+        let resolver = TargetResolver::new(&ParsedInventory::default(), TargetOverrides::default());
         
-        assert_eq!(detector.normalize_architecture("x86_64"), "x86_64");
-        assert_eq!(detector.normalize_architecture("amd64"), "x86_64");
-        assert_eq!(detector.normalize_architecture("ARM64"), "aarch64");
-        assert_eq!(detector.normalize_architecture("armv7l"), "armv7");
+        assert_eq!(resolver.normalize_architecture("x86_64"), "x86_64");
+        assert_eq!(resolver.normalize_architecture("amd64"), "x86_64");
+        assert_eq!(resolver.normalize_architecture("ARM64"), "aarch64");
+        assert_eq!(resolver.normalize_architecture("armv7l"), "armv7");
     }
     
     #[test]
     fn test_os_normalization() {
-        let detector = TargetDetector::new(&ParsedInventory::default());
+        let resolver = TargetResolver::new(&ParsedInventory::default(), TargetOverrides::default());
         
-        assert_eq!(detector.normalize_os("Linux"), "linux");
-        assert_eq!(detector.normalize_os("Darwin"), "darwin");
-        assert_eq!(detector.normalize_os("MacOS"), "darwin");
-        assert_eq!(detector.normalize_os("Windows"), "windows");
+        assert_eq!(resolver.normalize_os("Linux"), "linux");
+        assert_eq!(resolver.normalize_os("Darwin"), "darwin");
+        assert_eq!(resolver.normalize_os("MacOS"), "darwin");
+        assert_eq!(resolver.normalize_os("Windows"), "windows");
     }
     
     #[test]
     fn test_target_triple_generation() {
-        let detector = TargetDetector::new(&ParsedInventory::default());
+        let resolver = TargetResolver::new(&ParsedInventory::default(), TargetOverrides::default());
         
         assert_eq!(
-            detector.build_target_triple("x86_64", "linux"),
+            resolver.build_target_triple("x86_64", "linux"),
             Some("x86_64-unknown-linux-gnu".to_string())
         );
         
         assert_eq!(
-            detector.build_target_triple("aarch64", "darwin"),
+            resolver.build_target_triple("aarch64", "darwin"),
             Some("aarch64-apple-darwin".to_string())
         );
     }
     
     #[test]
-    fn test_host_target_detection() {
+    fn test_inventory_target_resolution() {
         let mut inventory = ParsedInventory {
             hosts: vec!["host1".to_string(), "host2".to_string()],
             groups: HashMap::new(),
             vars: HashMap::new(),
         };
         
-        // Add host facts
+        // Add host-specific variables
         inventory.vars.insert("host1".to_string(), serde_json::json!({
             "ansible_architecture": "x86_64",
             "ansible_system": "Linux"
@@ -398,31 +537,65 @@ mod tests {
             "ansible_os_family": "Darwin"
         }));
         
-        let detector = TargetDetector::new(&inventory);
+        let resolver = TargetResolver::new(&inventory, TargetOverrides::default());
         
-        let target1 = detector.detect_target_for_hosts(&["host1".to_string()]).unwrap();
+        let target1 = resolver.resolve_target_for_hosts(&["host1".to_string()]).unwrap();
         assert_eq!(target1.arch, "x86_64");
         assert_eq!(target1.os, "linux");
         
-        let target2 = detector.detect_target_for_hosts(&["host2".to_string()]).unwrap();
+        let target2 = resolver.resolve_target_for_hosts(&["host2".to_string()]).unwrap();
         assert_eq!(target2.arch, "aarch64");
         assert_eq!(target2.os, "darwin");
+    }
+    
+    #[test]
+    fn test_cli_override_priority() {
+        let inventory = ParsedInventory {
+            hosts: vec!["host1".to_string()],
+            groups: HashMap::new(),
+            vars: HashMap::from([(
+                "host1".to_string(),
+                serde_json::json!({
+                    "ansible_architecture": "x86_64",
+                    "ansible_system": "Linux"
+                })
+            )]),
+        };
+        
+        let overrides = TargetOverrides {
+            global_arch: Some("aarch64".to_string()),
+            global_os: Some("darwin".to_string()),
+            fact_cache_path: None,
+        };
+        
+        let resolver = TargetResolver::new(&inventory, overrides);
+        
+        // Host-specific variables should take priority over CLI overrides
+        let target = resolver.resolve_target_for_hosts(&["host1".to_string()]).unwrap();
+        assert_eq!(target.arch, "x86_64");
+        assert_eq!(target.os, "linux");
+        
+        // For hosts without specific variables, CLI override should apply
+        let target = resolver.resolve_target_for_hosts(&["unknown_host".to_string()]).unwrap();
+        assert_eq!(target.arch, "aarch64");
+        assert_eq!(target.os, "darwin");
     }
 }
 ```
 
 ### Integration Tests
-- Test with real inventory files containing various architectures
-- Verify execution plans include correct target information
-- Test fallback behavior with missing inventory facts
+- Test with real inventory files containing target variables
+- Verify execution plans include correct target information  
+- Test priority order of different override mechanisms
 - Test mixed architecture deployments
+- Test fact cache integration when available
 
 ## Edge Cases & Error Handling
 
-### Missing Inventory Facts
-- When host facts are not available, fall back to default x86_64-linux
+### Missing Target Information
+- When no target information is provided via any mechanism, use default x86_64-linux
 - Log warnings when using defaults
-- Include detection confidence in output
+- Include source of target information in output (e.g., "from inventory", "from CLI", "default")
 
 ### Mixed Architecture Groups
 - When a task group targets hosts with different architectures:
@@ -438,7 +611,26 @@ mod tests {
 ### Cross-Compilation Detection
 - Automatically detect when cross-compilation is needed
 - Set the `cross_compilation` flag appropriately
-- Include host architecture in metadata for debugging
+- Include controller architecture in metadata for debugging
+
+### Inventory Examples
+Users can specify target architectures in their inventory:
+```ini
+# Per-host specification
+[webservers]
+web1 ansible_host=192.168.1.10 ansible_architecture=x86_64 ansible_system=Linux
+web2 ansible_host=192.168.1.11 ansible_architecture=aarch64 ansible_system=Linux
+
+# Group-level specification  
+[databases:vars]
+ansible_architecture=x86_64
+ansible_system=Linux
+
+# Mixed architectures
+[edge_devices]
+edge1 ansible_host=10.0.1.1 ansible_architecture=armv7 ansible_system=Linux
+edge2 ansible_host=10.0.1.2 ansible_architecture=aarch64 ansible_system=Linux
+```
 
 ## Dependencies
 
@@ -459,51 +651,111 @@ mod tests {
 pub struct PlanningOptions {
     // ... existing fields ...
     
-    // New fields
-    pub target_detection: TargetDetectionMode,
-    pub default_target_arch: Option<String>,
-    pub default_target_os: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TargetDetectionMode {
-    Auto,        // Automatic detection from inventory
-    Manual,      // Use provided defaults
-    Disabled,    // Always use x86_64-linux
+    // New fields for target specification
+    pub target_arch: Option<String>,
+    pub target_os: Option<String>,
+    pub fact_cache_path: Option<PathBuf>,
 }
 ```
 
 ### Environment Variables
-- `RUSTLE_PLAN_DEFAULT_ARCH` - Override default architecture
-- `RUSTLE_PLAN_DEFAULT_OS` - Override default OS
-- `RUSTLE_PLAN_TARGET_DETECTION` - Set detection mode
+- `RUSTLE_TARGET_ARCH` - Override default architecture
+- `RUSTLE_TARGET_OS` - Override default OS
+- `RUSTLE_FACT_CACHE` - Path to Ansible fact cache
 
 ## Documentation
 
 ### API Documentation
 ```rust
-/// Detects target architecture and OS from inventory host information.
+/// Resolves target architecture and OS for binary compilation.
 /// 
-/// This module analyzes Ansible facts in the inventory to determine
-/// the appropriate compilation targets for binary deployments.
+/// This module provides a flexible system for determining compilation
+/// targets using multiple sources: inventory variables, CLI arguments,
+/// fact caches, and defaults.
+/// 
+/// # Priority Order
+/// 
+/// 1. Host-specific inventory variables
+/// 2. Group inventory variables  
+/// 3. CLI overrides (--target-arch, --target-os)
+/// 4. Fact cache (if available)
+/// 5. Default (x86_64-linux)
 /// 
 /// # Examples
 /// 
 /// ```
 /// let inventory = ParsedInventory::from_file("inventory.yml")?;
-/// let detector = TargetDetector::new(&inventory);
+/// let overrides = TargetOverrides {
+///     global_arch: Some("aarch64".to_string()),
+///     global_os: Some("linux".to_string()),
+///     fact_cache_path: None,
+/// };
+/// let resolver = TargetResolver::new(&inventory, overrides);
 /// 
-/// let target = detector.detect_target_for_hosts(&["web01", "web02"])?;
+/// let target = resolver.resolve_target_for_hosts(&["web01", "web02"])?;
 /// println!("Target: {}-{}", target.arch, target.os);
 /// ```
-pub struct TargetDetector { ... }
+pub struct TargetResolver { ... }
 ```
 
 ### User Documentation
-- Add section to README explaining target detection
-- Document supported architectures and OS combinations
-- Provide examples of inventory facts format
-- Explain fallback behavior and configuration options
+
+#### README Addition
+```markdown
+## Specifying Target Architectures
+
+Since Rustle compiles binaries ahead of time (unlike Ansible which runs Python at runtime), 
+you need to specify the target architecture and OS for your deployment hosts.
+
+### Methods to Specify Targets
+
+1. **Inventory Variables** (Recommended)
+   ```ini
+   [webservers]
+   web1 ansible_host=192.168.1.10 ansible_architecture=x86_64 ansible_system=Linux
+   web2 ansible_host=192.168.1.11 ansible_architecture=aarch64 ansible_system=Linux
+   
+   [databases:vars]
+   ansible_architecture=x86_64
+   ansible_system=Linux
+   ```
+
+2. **Command Line**
+   ```bash
+   rustle-plan --target-arch x86_64 --target-os linux playbook.yml inventory.ini
+   ```
+
+3. **Environment Variables**
+   ```bash
+   export RUSTLE_TARGET_ARCH=aarch64
+   export RUSTLE_TARGET_OS=linux
+   rustle-plan playbook.yml inventory.ini
+   ```
+
+4. **Fact Cache** (Advanced)
+   ```bash
+   # First gather facts
+   ansible all -m setup --tree /tmp/facts
+   
+   # Then use the fact cache
+   rustle-plan --fact-cache /tmp/facts playbook.yml inventory.ini
+   ```
+
+### Supported Targets
+
+| Architecture | OS | Target Triple |
+|-------------|-----|---------------|
+| x86_64 | linux | x86_64-unknown-linux-gnu |
+| aarch64 | linux | aarch64-unknown-linux-gnu |
+| x86_64 | darwin | x86_64-apple-darwin |
+| aarch64 | darwin | aarch64-apple-darwin |
+| x86_64 | windows | x86_64-pc-windows-msvc |
+| armv7 | linux | armv7-unknown-linux-gnueabihf |
+
+### Default Behavior
+
+If no target is specified, rustle-plan defaults to `x86_64-linux`.
+```
 
 ### Migration Guide
 - Existing execution plans remain compatible

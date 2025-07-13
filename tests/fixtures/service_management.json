@@ -1,0 +1,122 @@
+{
+  "metadata": {
+    "file_path": "tests/fixtures/playbooks/service_management.yml",
+    "version": null,
+    "created_at": "2025-07-13T03:39:00.874129Z",
+    "checksum": "ee510a0b1ff9b5e638be95df7ce6e15b7b4e794d189bdecbeda636eac29f8791"
+  },
+  "plays": [
+    {
+      "name": "Service management test",
+      "hosts": "test_hosts",
+      "vars": {},
+      "tasks": [
+        {
+          "id": "task_0",
+          "name": "Install nginx for testing",
+          "module": "package",
+          "args": {
+            "name": "nginx",
+            "state": "present"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_1",
+          "name": "Start nginx service",
+          "module": "service",
+          "args": {
+            "state": "started",
+            "enabled": true,
+            "name": "nginx"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_2",
+          "name": "Check nginx status",
+          "module": "command",
+          "args": {
+            "_raw_params": "systemctl is-active nginx"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": false,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_3",
+          "name": "Restart nginx service",
+          "module": "service",
+          "args": {
+            "name": "nginx",
+            "state": "restarted"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_4",
+          "name": "Verify nginx is listening on port 80",
+          "module": "wait_for",
+          "args": {
+            "host": "localhost",
+            "timeout": 30,
+            "port": 80,
+            "delay": 2
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        }
+      ],
+      "handlers": [],
+      "roles": [],
+      "strategy": "linear",
+      "serial": null,
+      "max_fail_percentage": null
+    }
+  ],
+  "variables": {},
+  "facts_required": false,
+  "vault_ids": []
+}

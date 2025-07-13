@@ -14,6 +14,7 @@ This document tracks the status of all specification documents in the project.
 |------|---------|--------|
 | 020 | Caching Optimization | ⬜ Planned |
 | 030 | Target Architecture Detection | ⬜ Planned |
+| 040 | Conditional Task Filtering | ⬜ Planned |
 
 ## Notes
 

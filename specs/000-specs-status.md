@@ -13,6 +13,7 @@ This document tracks the status of all specification documents in the project.
 | Spec | Feature | Status |
 |------|---------|--------|
 | 020 | Caching Optimization | ⬜ Planned |
+| 030 | Target Architecture Detection | ⬜ Planned |
 
 ## Notes
 

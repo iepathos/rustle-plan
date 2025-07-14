@@ -277,11 +277,40 @@ where
     }
 }
 
+fn remove_first_inventory_field(content: &str) -> String {
+    // Count occurrences of "inventory": field
+    let inventory_pattern = r#""inventory":"#;
+    let count = content.matches(inventory_pattern).count();
+
+    // Only remove first occurrence if there are multiple
+    if count > 1 {
+        if let Some(first_pos) = content.find(inventory_pattern) {
+            let mut result = content.to_string();
+            result.replace_range(
+                first_pos..first_pos + inventory_pattern.len(),
+                r#""old_inventory":"#,
+            );
+            result
+        } else {
+            content.to_string()
+        }
+    } else {
+        content.to_string()
+    }
+}
+
 fn parse_rustle_output(
     content: &str,
 ) -> Result<(rustle_plan::ParsedPlaybook, rustle_plan::ParsedInventory)> {
     use serde::Deserialize;
     use std::collections::HashMap;
+
+    // Handle duplicate inventory fields by removing the first occurrence
+    let processed_content = remove_first_inventory_field(content);
+
+    // Parse the processed content
+    let json_value: serde_json::Value = serde_json::from_str(&processed_content)
+        .context("Failed to parse JSON from rustle-parse")?;
 
     #[derive(Deserialize)]
     struct RustleParseOutput {
@@ -337,13 +366,60 @@ fn parse_rustle_output(
 
     #[derive(Deserialize)]
     struct RustleParseInventory {
-        hosts: Vec<String>,
-        groups: HashMap<String, Vec<String>>,
+        // Support both old format (host array) and new format (host objects)
+        #[serde(default)]
+        hosts: Option<serde_json::Value>, // Can be Vec<String> or HashMap<String, RustleParseHost>
+        #[serde(default)]
+        groups: Option<serde_json::Value>, // Can be HashMap<String, Vec<String>> or HashMap<String, RustleParseGroup>
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
+        host_vars: Option<HashMap<String, HashMap<String, serde_json::Value>>>,
+        #[serde(default)]
+        variables: Option<HashMap<String, serde_json::Value>>,
+        #[serde(default)]
+        vars: Option<HashMap<String, serde_json::Value>>, // Alternative field name for variables
+        #[serde(default)]
+        #[allow(dead_code)] // Future use for host facts integration
+        host_facts: Option<HashMap<String, HashMap<String, serde_json::Value>>>,
+    }
+
+    #[derive(Deserialize)]
+    struct RustleParseHost {
+        #[allow(dead_code)] // Used for deserialization compatibility
+        name: String,
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
+        address: Option<String>,
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
+        port: Option<u16>,
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
+        user: Option<String>,
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
+        groups: Vec<String>,
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
         vars: HashMap<String, serde_json::Value>,
     }
 
-    let parsed: RustleParseOutput =
-        serde_json::from_str(content).context("Failed to parse JSON from rustle-parse")?;
+    #[derive(Deserialize)]
+    struct RustleParseGroup {
+        #[allow(dead_code)] // Used for deserialization compatibility
+        name: String,
+        #[serde(default)]
+        hosts: Vec<String>,
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
+        children: Vec<String>,
+        #[serde(default)]
+        #[allow(dead_code)] // Used for deserialization compatibility
+        vars: HashMap<String, serde_json::Value>,
+    }
+
+    let parsed: RustleParseOutput = serde_json::from_value(json_value)
+        .context("Failed to parse structured data from rustle-parse")?;
 
     // Extract playbook name from file path
     let playbook_name = std::path::Path::new(&parsed.metadata.file_path)
@@ -400,10 +476,56 @@ fn parse_rustle_output(
     };
 
     let parsed_inventory = if let Some(inventory) = parsed.inventory {
+        // Extract host names - support both old format (Vec<String>) and new format (HashMap)
+        let hosts = if let Some(hosts_value) = inventory.hosts {
+            if let Ok(host_vec) = serde_json::from_value::<Vec<String>>(hosts_value.clone()) {
+                // Old format: simple array of host names
+                host_vec
+            } else if let Ok(host_map) =
+                serde_json::from_value::<HashMap<String, RustleParseHost>>(hosts_value)
+            {
+                // New format: object with host details
+                host_map.keys().cloned().collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        // Extract group-to-hosts mapping - support both old and new formats
+        let groups = if let Some(groups_value) = inventory.groups {
+            if let Ok(group_map) =
+                serde_json::from_value::<HashMap<String, Vec<String>>>(groups_value.clone())
+            {
+                // Old format: simple mapping of group name to host array
+                group_map
+            } else if let Ok(group_objects) =
+                serde_json::from_value::<HashMap<String, RustleParseGroup>>(groups_value)
+            {
+                // New format: object with group details
+                group_objects
+                    .into_iter()
+                    .map(|(name, group)| (name, group.hosts))
+                    .collect()
+            } else {
+                HashMap::new()
+            }
+        } else {
+            HashMap::new()
+        };
+
+        // Use variables from the inventory (try both field names)
+        let vars = inventory.variables.or(inventory.vars).unwrap_or_default();
+
+        // Extract host facts if available
+        let host_facts = inventory.host_facts.unwrap_or_default();
+
         rustle_plan::ParsedInventory {
-            hosts: inventory.hosts,
-            groups: inventory.groups,
-            vars: inventory.vars,
+            hosts,
+            groups,
+            vars,
+            host_facts,
         }
     } else {
         create_default_inventory()
@@ -417,6 +539,7 @@ fn create_default_inventory() -> rustle_plan::ParsedInventory {
         hosts: vec!["localhost".to_string()],
         groups: std::collections::HashMap::new(),
         vars: std::collections::HashMap::new(),
+        host_facts: std::collections::HashMap::new(),
     }
 }
 

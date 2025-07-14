@@ -92,7 +92,7 @@ impl ExecutionPlanner {
 
             // Plan binary deployments for this play
             let binary_deployments = if !options.force_ssh {
-                self.plan_binary_deployments(&task_plans, &play_hosts)?
+                self.plan_binary_deployments_with_inventory(&task_plans, &play_hosts, inventory)?
             } else {
                 Vec::new()
             };
@@ -544,6 +544,20 @@ impl ExecutionPlanner {
     ) -> Result<Vec<BinaryDeployment>, PlanError> {
         self.binary_planner
             .plan_deployments(tasks, hosts, self.binary_threshold)
+    }
+
+    pub fn plan_binary_deployments_with_inventory(
+        &self,
+        tasks: &[TaskPlan],
+        hosts: &[String],
+        inventory: &ParsedInventory,
+    ) -> Result<Vec<BinaryDeployment>, PlanError> {
+        self.binary_planner.plan_deployments_with_inventory(
+            tasks,
+            hosts,
+            self.binary_threshold,
+            Some(inventory),
+        )
     }
 
     pub fn analyze_dependencies(&self, tasks: &[ParsedTask]) -> Result<DependencyGraph, PlanError> {

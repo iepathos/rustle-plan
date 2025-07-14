@@ -348,6 +348,7 @@ fn parse_rustle_output(
             hosts: inventory.hosts,
             groups: inventory.groups,
             vars: inventory.vars,
+            host_facts: std::collections::HashMap::new(),
         }
     } else {
         create_default_inventory()
@@ -361,6 +362,7 @@ fn create_default_inventory() -> rustle_plan::ParsedInventory {
         hosts: vec!["localhost".to_string()],
         groups: std::collections::HashMap::new(),
         vars: std::collections::HashMap::new(),
+        host_facts: std::collections::HashMap::new(),
     }
 }
 

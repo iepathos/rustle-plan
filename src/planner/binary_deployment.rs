@@ -64,6 +64,16 @@ impl BinaryDeploymentPlanner {
         hosts: &[String],
         threshold: u32,
     ) -> Result<Vec<BinaryDeployment>, PlanError> {
+        self.plan_deployments_with_inventory(tasks, hosts, threshold, None)
+    }
+
+    pub fn plan_deployments_with_inventory(
+        &self,
+        tasks: &[TaskPlan],
+        hosts: &[String],
+        threshold: u32,
+        inventory: Option<&ParsedInventory>,
+    ) -> Result<Vec<BinaryDeployment>, PlanError> {
         // Group tasks by compatibility and suitability
         let task_groups = self.analyze_task_groups(tasks)?;
 
@@ -75,7 +85,7 @@ impl BinaryDeploymentPlanner {
 
                 match decision {
                     BinaryDeploymentDecision::Deploy { .. } => {
-                        let deployment = self.create_binary_deployment(&group, hosts)?;
+                        let deployment = self.create_binary_deployment(&group, hosts, inventory)?;
                         deployments.push(deployment);
                     }
                     BinaryDeploymentDecision::Skip { .. } => {
@@ -181,6 +191,7 @@ impl BinaryDeploymentPlanner {
         &self,
         group: &TaskGroup,
         hosts: &[String],
+        inventory: Option<&ParsedInventory>,
     ) -> Result<BinaryDeployment, PlanError> {
         let deployment_hosts: Vec<String> = hosts
             .iter()
@@ -193,14 +204,15 @@ impl BinaryDeploymentPlanner {
 
         Ok(BinaryDeployment {
             deployment_id: group.id.clone(),
-            target_hosts: deployment_hosts,
+            target_hosts: deployment_hosts.clone(),
             binary_name: format!("rustle-runner-{}", group.id),
             tasks: group.tasks.iter().map(|t| t.task_id.clone()).collect(),
             modules: group.modules.clone(),
             embedded_data,
             execution_mode: BinaryExecutionMode::Controller,
             estimated_size,
-            compilation_requirements: self.create_compilation_requirements()?,
+            compilation_requirements: self
+                .create_compilation_requirements(&deployment_hosts, inventory)?,
         })
     }
 
@@ -312,14 +324,72 @@ impl BinaryDeploymentPlanner {
         Ok(base_size + embedded_size + static_file_size)
     }
 
-    fn create_compilation_requirements(&self) -> Result<CompilationRequirements, PlanError> {
+    fn create_compilation_requirements(
+        &self,
+        target_hosts: &[String],
+        inventory: Option<&ParsedInventory>,
+    ) -> Result<CompilationRequirements, PlanError> {
+        // Try to determine target architecture from host facts
+        let (target_arch, target_os) = if let Some(inventory) = inventory {
+            self.determine_target_from_facts(target_hosts, inventory)
+        } else {
+            // Fallback to default values if no inventory/facts available
+            ("x86_64".to_string(), "linux".to_string())
+        };
+
+        // Check if cross-compilation is needed
+        let current_arch = std::env::consts::ARCH;
+        let current_os = std::env::consts::OS;
+        let cross_compilation = target_arch != current_arch || target_os != current_os;
+
         Ok(CompilationRequirements {
-            target_arch: "x86_64".to_string(),
-            target_os: "linux".to_string(),
+            target_arch,
+            target_os,
             rust_version: "1.70.0".to_string(),
-            cross_compilation: false,
+            cross_compilation,
             static_linking: true,
         })
+    }
+
+    fn determine_target_from_facts(
+        &self,
+        target_hosts: &[String],
+        inventory: &ParsedInventory,
+    ) -> (String, String) {
+        // Use the first target host with facts available
+        for host in target_hosts {
+            if let Some(facts) = inventory.host_facts.get(host) {
+                let arch = facts
+                    .get("ansible_architecture")
+                    .and_then(|v| v.as_str())
+                    .map(|arch| match arch {
+                        "aarch64" => "aarch64",
+                        "arm64" => "aarch64",
+                        "x86_64" => "x86_64",
+                        "i386" | "i686" => "i686",
+                        _ => "x86_64", // default fallback
+                    })
+                    .unwrap_or("x86_64")
+                    .to_string();
+
+                let os = facts
+                    .get("ansible_system")
+                    .and_then(|v| v.as_str())
+                    .map(|system| match system {
+                        "Darwin" => "macos",
+                        "Linux" => "linux",
+                        "Windows" => "windows",
+                        _ => "linux", // default fallback
+                    })
+                    .unwrap_or("linux")
+                    .to_string();
+
+                return (arch, os);
+            }
+        }
+
+        // Fallback if no facts found
+        ("x86_64".to_string(), "linux".to_string())
     }
 
     fn optimize_binary_deployments(

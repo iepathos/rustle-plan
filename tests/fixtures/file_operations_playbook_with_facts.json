@@ -1,0 +1,195 @@
+{
+  "metadata": {
+    "file_path": "tests/fixtures/playbooks/file_operations_playbook.yml",
+    "name": null,
+    "version": null,
+    "created_at": "2025-07-14T00:14:54.955779Z",
+    "parsed_at": null,
+    "checksum": "b1933318bc7de39072bbf4d3ff26c229d989fb5f9ac8673b3738e9b3e0f6aa3d"
+  },
+  "plays": [
+    {
+      "name": "Comprehensive file operations playbook",
+      "hosts": "all",
+      "vars": {
+        "test_base_dir": "/tmp/rustle_file_test"
+      },
+      "tasks": [
+        {
+          "id": "task_0",
+          "name": "Create base directory structure",
+          "module": "file",
+          "args": {
+            "mode": "0755",
+            "path": "/tmp/rustle_file_test",
+            "recurse": true,
+            "state": "directory"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [
+            "ansible",
+            "files",
+            "copy",
+            "permissions"
+          ],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_1",
+          "name": "Create subdirectories",
+          "module": "file",
+          "args": {
+            "mode": "0750",
+            "path": "/tmp/rustle_file_test/",
+            "state": "directory"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": [
+            "config",
+            "data",
+            "logs",
+            "backups"
+          ],
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_2",
+          "name": "Copy configuration file",
+          "module": "copy",
+          "args": {
+            "backup": true,
+            "dest": "/tmp/rustle_file_test/config/app.conf",
+            "mode": "0644",
+            "src": "tests/fixtures/files/test_files/sample.conf"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_3",
+          "name": "Create empty log file",
+          "module": "file",
+          "args": {
+            "mode": "0664",
+            "path": "/tmp/rustle_file_test/logs/app.log",
+            "state": "touch"
+          },
+          "vars": {},
+          "when": null,
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        },
+        {
+          "id": "task_4",
+          "name": "Create symbolic link",
+          "module": "file",
+          "args": {
+            "dest": "/tmp/rustle_file_test/current.conf",
+            "src": "/tmp/rustle_file_test/config/app.conf",
+            "state": "link"
+          },
+          "vars": {},
+          "when": "ansible_system != \"Windows\"",
+          "loop_items": null,
+          "tags": [],
+          "notify": [],
+          "changed_when": null,
+          "failed_when": null,
+          "ignore_errors": false,
+          "delegate_to": null,
+          "dependencies": []
+        }
+      ],
+      "handlers": [],
+      "roles": [],
+      "strategy": "linear",
+      "serial": null,
+      "max_fail_percentage": null
+    }
+  ],
+  "variables": {},
+  "facts_required": false,
+  "vault_ids": [],
+  "inventory": {
+    "hosts": {
+      "localhost": {
+        "address": null,
+        "ansible_become": null,
+        "become_flags": null,
+        "become_method": null,
+        "become_user": null,
+        "connection": "local",
+        "connection_timeout": null,
+        "groups": [
+          "single_host",
+          "all"
+        ],
+        "name": "localhost",
+        "port": null,
+        "ssh_common_args": null,
+        "ssh_extra_args": null,
+        "ssh_pipelining": null,
+        "ssh_private_key_file": null,
+        "user": null,
+        "vars": {
+          "ansible_connection": "local"
+        }
+      }
+    },
+    "groups": {
+      "single_host": {
+        "name": "single_host",
+        "hosts": [
+          "localhost"
+        ],
+        "children": [],
+        "vars": {}
+      },
+      "all": {
+        "name": "all",
+        "hosts": [
+          "localhost"
+        ],
+        "children": [],
+        "vars": {}
+      }
+    },
+    "variables": {},
+    "host_facts": {
+      "localhost": {
+        "ansible_architecture": "aarch64",
+        "ansible_system": "Darwin",
+        "ansible_os_family": "darwin",
+        "ansible_distribution": "macOS"
+      }
+    }
+  }
+}

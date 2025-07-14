@@ -66,6 +66,7 @@ fn test_basic_execution_planning() {
         hosts: vec!["server1".to_string(), "server2".to_string()],
         groups: HashMap::new(),
         vars: HashMap::new(),
+        host_facts: HashMap::new(),
     };
 
     // Create planning options

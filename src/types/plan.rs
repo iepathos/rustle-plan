@@ -206,6 +206,8 @@ pub struct ParsedInventory {
     pub hosts: Vec<String>,
     pub groups: HashMap<String, Vec<String>>,
     pub vars: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub host_facts: HashMap<String, HashMap<String, serde_json::Value>>,
 }
 
 // Analysis structures

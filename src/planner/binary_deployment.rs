@@ -333,14 +333,40 @@ impl BinaryDeploymentPlanner {
         let (target_arch, target_os) = if let Some(inventory) = inventory {
             self.determine_target_from_facts(target_hosts, inventory)
         } else {
-            // Fallback to default values if no inventory/facts available
-            ("x86_64".to_string(), "linux".to_string())
+            // Special case for localhost - use current system architecture
+            if target_hosts.len() == 1 && target_hosts[0] == "localhost" {
+                let arch = match std::env::consts::ARCH {
+                    "aarch64" => "aarch64",
+                    "x86_64" => "x86_64",
+                    "x86" => "i686",
+                    "arm" => "armv7",
+                    other => other,
+                }
+                .to_string();
+
+                let os = match std::env::consts::OS {
+                    "macos" => "darwin",
+                    "linux" => "linux",
+                    "windows" => "windows",
+                    other => other,
+                }
+                .to_string();
+
+                (arch, os)
+            } else {
+                // Fallback to default values if no inventory/facts available
+                ("x86_64".to_string(), "linux".to_string())
+            }
         };
 
         // Check if cross-compilation is needed
         let current_arch = std::env::consts::ARCH;
         let current_os = std::env::consts::OS;
-        let cross_compilation = target_arch != current_arch || target_os != current_os;
+        let normalized_current_os = match current_os {
+            "macos" => "darwin",
+            other => other,
+        };
+        let cross_compilation = target_arch != current_arch || target_os != normalized_current_os;
 
         Ok(CompilationRequirements {
             target_arch,
@@ -376,7 +402,7 @@ impl BinaryDeploymentPlanner {
                     .get("ansible_system")
                     .and_then(|v| v.as_str())
                     .map(|system| match system {
-                        "Darwin" => "macos",
+                        "Darwin" => "darwin",
                         "Linux" => "linux",
                         "Windows" => "windows",
                         _ => "linux", // default fallback
